@@ -894,7 +894,7 @@ queryCountlMethod.setBodyText(`const custom_metadata = {
   "internal": false,
   "log": []
 };
-const controller = new _progress.ProgressController(custom_metadata, this);
+const controller = new _progress2.ProgressController(custom_metadata, this);
 return await controller.run(async progress => {
   progress.log("waiting for " + this._asLocator(selector));
   const promise = await this._retryWithProgressIfNotConnected(progress, selector, false, false, async result => {
@@ -902,8 +902,8 @@ return await controller.run(async progress => {
     const handles = result[1];
     return handle ? handles.length : 0;
   }, 'returnAll');
-  return promise;
-}, 100); // A bit geeky but its okay :D
+  return promise === null ? -1 : promise; // It was returning null and causing an ugly Locator.count: value: expected number, got object
+}); // <<< REMOVED ', 100' // A bit geeky but its okay :D => IT'S NOT OKAY IF YOU ARE DOING SOMETHING THAT TAKES LONGER
 `);
 
 // -- _expectInternal Method --
