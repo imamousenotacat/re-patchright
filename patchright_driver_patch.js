@@ -894,7 +894,7 @@ queryCountlMethod.setBodyText(`const custom_metadata = {
   "internal": false,
   "log": []
 };
-const controller = new _progress.ProgressController(custom_metadata, this);
+const controller = new ProgressController(custom_metadata, this);
 return await controller.run(async progress => {
   progress.log("waiting for " + this._asLocator(selector));
   const promise = await this._retryWithProgressIfNotConnected(progress, selector, false, false, async result => {
