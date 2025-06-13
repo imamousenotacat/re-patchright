@@ -2322,6 +2322,48 @@ for (const handle of closedShadowRootHandles) {
 return finalArrayHandle;
 `);
 
+// -- lookForFrameInClosedShadowRoots Method --
+frameSelectorsClass.addMethod({
+  name: "lookForFrameInClosedShadowRoots",
+  isAsync: true,
+  parameters: [
+    { name: "frame" },
+    { name: "injectedScript" },
+    { name: "info" },
+    { name: "selectorString" },
+  ],
+}).setBodyText(`const closedShadowRoots = await frame.getClosedShadowRoots()
+const elements = []
+for (const shadowRootHandle of closedShadowRoots) {
+  const handle = await injectedScript.evaluateHandle((remoteInjectedScript, {
+    info,
+    scope,
+    selectorString
+  }) => {
+    const element = remoteInjectedScript.querySelector(info.parsed, scope, info.strict);
+    if (element && element.nodeName !== 'IFRAME' && element.nodeName !== 'FRAME')
+      throw remoteInjectedScript.createStacklessError(\`Selector "\${selectorString}" resolved to \${remoteInjectedScript.previewNode(element)}, <iframe/> was expected\`);
+    return element;
+  }, {
+    info,
+    scope: shadowRootHandle,
+    selectorString
+  });
+  const element = handle.asElement();
+  if (element) elements.push(element)
+  // Getting rid of the shadowRootHandle after using it to avoid creating memory leaks ...
+  await shadowRootHandle.dispose();
+}
+
+if (elements.length > 1) {
+  // We throw a NonRecoverableDOMError indicating multiple frames found within closed shadow roots.
+  // I'm not sure if this is really an error but I want to see it when it happens and I want it to stop the execution ...
+  const elementsPreview = elements.map(e => e.toString()).join(', ');
+  throw new _dom.NonRecoverableDOMError(\`Selector "\${selectorString}" resolved to \${elements.length} elements in closed shadow roots: [\${elementsPreview}]. Expected 1 frame element.\`);
+}
+return elements.length === 1 ? elements[0] : null;
+`);
+
 // Save the changes without reformatting
 project.saveSync();
 
