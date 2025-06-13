@@ -2233,7 +2233,6 @@ for (const imp of importDeclarations) {
 selectorsSourceFile.insertImportDeclarations(targetStatementIndex, [{
     moduleSpecifier: newImportModuleSpecifier,
     namedImports: [{ name: newImportNamedImport }],
-    isTypeOnly: true
 }]);
 const frameSelectorsClass = selectorsSourceFile.getClassOrThrow("FrameSelectors");
 
@@ -2342,7 +2341,7 @@ for (const shadowRootHandle of closedShadowRoots) {
   }) => {
     const element = remoteInjectedScript.querySelector(info.parsed, scope, info.strict);
     if (element && element.nodeName !== 'IFRAME' && element.nodeName !== 'FRAME')
-      throw remoteInjectedScript.createStacklessError(\`Selector "\${selectorString}" resolved to \${remoteInjectedScript.previewNode(element)}, <iframe/> was expected\`);
+      throw remoteInjectedScript.createStacklessError(\`Selector "\${selectorString}" resolved to \${remoteInjectedScript.previewNode(element)}, <iframe> was expected\`);
     return element;
   }, {
     info,
@@ -2359,8 +2358,10 @@ if (elements.length > 1) {
   // We throw a NonRecoverableDOMError indicating multiple frames found within closed shadow roots.
   // I'm not sure if this is really an error but I want to see it when it happens and I want it to stop the execution ...
   const elementsPreview = elements.map(e => e.toString()).join(', ');
-  throw new _dom.NonRecoverableDOMError(\`Selector "\${selectorString}" resolved to \${elements.length} elements in closed shadow roots: [\${elementsPreview}]. Expected 1 frame element.\`);
+  throw new NonRecoverableDOMError(\`Selector "\${selectorString}" resolved to \${elements.length} elements in closed shadow roots: [\${elementsPreview}]. Expected 1 frame element.\`);
 }
+
+// Return the single element found, or null if none were found.
 return elements.length === 1 ? elements[0] : null;
 `);
 
