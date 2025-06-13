@@ -2,6 +2,29 @@ import fs from "node:fs/promises";
 import { Project, SyntaxKind, IndentationText, ObjectLiteralExpression } from "ts-morph";
 import YAML from "yaml";
 
+// --- Helper function to modify babel.config.json ---
+async function modifyBabelConfig() {
+  const babelConfigPath = "../playwright/babel.config.json"; // Adjusted path
+  try {
+    const babelConfigContent = await fs.readFile(babelConfigPath, "utf8");
+    const babelConfig = JSON.parse(babelConfigContent);
+
+    if (babelConfig.plugins && Array.isArray(babelConfig.plugins)) {
+      babelConfig.plugins = babelConfig.plugins.filter(
+        (plugin) => plugin !== "@babel/plugin-transform-optional-chaining" &&
+                     (Array.isArray(plugin) ? plugin[0] !== "@babel/plugin-transform-optional-chaining" : true)
+      );
+    }
+
+    await fs.writeFile(babelConfigPath, JSON.stringify(babelConfig, null, 2), "utf8");
+    console.log(`Successfully removed "@babel/plugin-transform-optional-chaining" from ${babelConfigPath}`);
+  } catch (error) {
+    console.error(`Error modifying ${babelConfigPath}:`, error);
+  }
+}
+
+await modifyBabelConfig();
+
 const project = new Project({
   manipulationSettings: {
     indentationText: IndentationText.TwoSpaces,
