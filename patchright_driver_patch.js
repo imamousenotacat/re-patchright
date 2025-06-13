@@ -887,6 +887,29 @@ isVisibleInternalMethod.setBodyText(`try {
   if (js.isJavaScriptErrorInEvaluate(e) || isInvalidSelectorError(e) || isSessionClosedError(e)) throw e;
   return false;
 }`)
+// -- querySelectorAll Method --
+const querySelectorAllMethod = frameClass.getMethod("querySelectorAll");
+querySelectorAllMethod.setBodyText(`/* Implementing the same logic as in 'queryCount': this function returns 'handles', 'queryCount' returns
+   'handles.length'. Before this modification this function invoked FrameSelectors.queryAll which I think
+   isn't used anymore ...
+*/
+const custom_metadata = {
+  "internal": false,
+  "log": []
+};
+const controller = new ProgressController(custom_metadata, this);
+return await controller.run(async progress => {
+  const handles = await this._retryWithProgressIfNotConnected(progress, selector, false, false , async result => {
+    if (!result || !result[0]) { // No elements found, or result itself is null from _retry...
+        return [];
+    }
+    return result[1]; // Return currentScopingElements (array of ElementHandles)
+  }, 'returnAll');
+  // If _retryWithProgressIfNotConnected itself returns null (e.g., on timeout before action is run, or if action returns null explicitly),
+  // handles will be null. Otherwise, it's the array from the action (possibly empty).
+  return handles === null ? [] : handles;
+});
+`)
 
 // -- queryCount Method --
 const queryCountlMethod = frameClass.getMethod("queryCount");
