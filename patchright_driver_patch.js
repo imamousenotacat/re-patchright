@@ -2206,6 +2206,122 @@ queryAllMethodBody.insertStatements(0, [
   ""
 ]);
 
+// ----------------------------
+// server/frameSelectors.ts
+// ----------------------------
+const selectorsSourceFile = project.addSourceFileAtPath(
+  "packages/playwright-core/src/server/frameSelectors.ts"
+);
+
+const newImportModuleSpecifier = "./dom";
+const newImportNamedImport = "NonRecoverableDOMError";
+
+// Almost 15 lines of code to insert a simple import. There has to be a better way :-(
+let targetStatementIndex = 0; // Default to inserting at the beginning
+const importDeclarations = selectorsSourceFile.getImportDeclarations();
+
+// Find the target 'ParsedSelector' import to insert after
+for (const imp of importDeclarations) {
+    if (imp.getModuleSpecifierValue() === '../utils/isomorphic/selectorParser' && // Check module path
+        imp.isTypeOnly() && // Check if the import declaration itself is type-only
+        imp.getNamedImports().some(ni => ni.getName() === 'ParsedSelector')) { // Check for named import "ParsedSelector"
+        targetStatementIndex = imp.getChildIndex() + 1;
+        break;
+    }
+}
+
+selectorsSourceFile.insertImportDeclarations(targetStatementIndex, [{
+    moduleSpecifier: newImportModuleSpecifier,
+    namedImports: [{ name: newImportNamedImport }],
+    isTypeOnly: true
+}]);
+const frameSelectorsClass = selectorsSourceFile.getClassOrThrow("FrameSelectors");
+
+// -- queryArrayInMainWorld Method --
+const queryArrayInMainWorldMethod = frameSelectorsClass.getMethodOrThrow("queryArrayInMainWorld");
+queryArrayInMainWorldMethod.setBodyText(`
+// _debugLogger.debugLogger.log('api',\`PVM14 queryArrayInMainWorld: selector=[\${selector}] scope=[\${scope}]...\`);
+const resolved = await this.resolveInjectedForSelector(selector, {
+  mainWorld: true
+}, scope);
+// Be careful, |this.frame| can be different from |resolved.frame|.
+if (!resolved) throw new Error(\`Failed to find frame for selector "\${selector}"\`);
+// _debugLogger.debugLogger.log('api',
+//   \`PVM14 queryArrayInMainWorld: resolved.info=[\${JSON.stringify(resolved.info)}] resolved.scope=[\${
+//     resolved.scope}] resolved.frame !== this.frame [\${resolved.frame !== this.frame}] ...\`);
+
+/* All this code below is needed because certain execution paths (e.g., 'all_inner_texts()' or 'element_handles()' invocations)
+    get here and, in the case of existing closed shadow roots, just by inspecting what is in the 'resolved.frame'
+    they wouldn't get all the elements. The real question is: WHY DIDN'T I HAVE TO IMPLEMENT THIS IN OTHER POINTS
+    OF THIS FILE AS 'query', 'queryCount' OR 'queryAll' ?
+    I think the response is that these functions aren't used anymore, but I'm not sure... */
+
+// Get JSHandles to all closed shadow roots first. These handles will be passed to the browser-side function.
+const closedShadowRootHandles = await resolved.frame.getClosedShadowRoots();
+// _debugLogger.debugLogger.log('api', \`PVM14 queryArrayInMainWorld: Found \${closedShadowRootHandles.length} closed shadow roots.\`);
+
+/* This function runs in the browser.
+    argInitialScope is a DOM element (or document/null).
+    argShadowRootDOMElements is an array of ShadowRoot DOM elements. */
+const pageFunction = (injected, { argInfo, argInitialScope, argShadowRootDOMElements }) => {
+  const allFoundDOMElements = [];
+  const parsedSelector = argInfo.parsed;
+
+  /* 1. Query in the main document (or initial scope)
+      'injected.querySelectorAll' returns a NodeList or similar array-like structure of DOM elements. */
+  const mainDocNodeList = injected.querySelectorAll(parsedSelector, argInitialScope || document);
+  for (let i = 0; i < mainDocNodeList.length; i++) {
+    allFoundDOMElements.push(mainDocNodeList[i]);
+  }
+  // console.log(\`PVM14 BROWSER: Found \${mainDocNodeList.length} elements in main/initial scope for selector:\`, parsedSelector);
+
+  /* TODO: PVM14 Ugly as hell. Tailor-made "if" designed to make locator "> *" work.
+      The idea is—to avoid duplicates—not to check shadow roots if we are looking for "scope > *"
+      unless we are dealing with the host of the shadowRoot (in that case, the direct children of the host
+      are the shadowRoots and they must be inspected). */
+  var firstSimple = parsedSelector?.parts?.[0]?.body?.[0]?.simples?.[0];
+  var lookingForDirectChildElementsOfCurrentElement = firstSimple?.selector?.functions?.[0]?.name === "scope" && firstSimple?.combinator === ">";
+
+  /* 2. Query in each closed shadow root
+      argShadowRootDOMElements is an array of actual ShadowRoot DOM elements here. */
+  for (const shadowRoot of argShadowRootDOMElements) {
+    const isScopeTheHost = argInitialScope === shadowRoot.host;
+    if (lookingForDirectChildElementsOfCurrentElement && !isScopeTheHost) { } else {
+      const shadowNodeList = injected.querySelectorAll(parsedSelector, shadowRoot);
+      for (let i = 0; i < shadowNodeList.length; i++) {
+        allFoundDOMElements.push(shadowNodeList[i]);
+      }
+    }
+    // console.log(\`PVM14 BROWSER: Found \${shadowNodeList.length} elements in a shadow root for selector:\`, parsedSelector);
+  }
+  // console.log(\`PVM14 BROWSER: Total elements found: \${allFoundDOMElements.length}\`);
+  return allFoundDOMElements; // This will be an array of DOM elements
+};
+
+/* Execute the pageFunction in the browser.
+    - resolved.injected is the InjectedScript instance for the correct context.
+    - The second argument to evaluateHandle is an object containing arguments for pageFunction.
+      JSHandles (like resolved.scope and elements of closedShadowRootHandles) passed here
+      will be resolved to their corresponding DOM elements/values within pageFunction. */
+const finalArrayHandle = await resolved.injected.evaluateHandle(
+  pageFunction,
+  { // Argument for pageFunction
+    argInfo: resolved.info,
+    argInitialScope: resolved.scope, // JSHandle, resolves to DOM element/null in pageFunction
+    argShadowRootDOMElements: closedShadowRootHandles // Array of JSHandles, resolves to array of ShadowRoot DOM elements
+  }
+);
+
+/* Dispose the JSHandles for the shadow roots now that they've been used
+    and their corresponding DOM elements have been processed by pageFunction. */
+for (const handle of closedShadowRootHandles) {
+  await handle.dispose();
+}
+// _debugLogger.debugLogger.log('api', \`PVM14 queryArrayInMainWorld: Disposed \${closedShadowRootHandles.length} closed shadow root JSHandles.\`);
+
+return finalArrayHandle;
+`);
+
 // Save the changes without reformatting
 project.saveSync();
 
