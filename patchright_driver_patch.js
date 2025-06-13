@@ -1199,6 +1199,79 @@ while (parsed.parts.length > 0) {
 }
 return currentScopingElements;`);
 
+// -- getClosedShadowRoots Method --
+frameClass.addMethod({
+  name: "getClosedShadowRoots",
+  isAsync: true,
+  // No explicit return type, ts-morph will infer or it can be added if needed
+});
+const getClosedShadowRootsMethod = frameClass.getMethodOrThrow("getClosedShadowRoots");
+getClosedShadowRootsMethod.setBodyText(`
+    // TODO:PVM14 Getting all the closed ShadowRoot recursively. We don't traverse IFRAMEs for the moment ...
+    let context = await this._context("main");
+    // Getting the CDP client ...
+    try {
+      var client = this._page._delegate._sessionForFrame(this)._client;
+    } catch (e) {
+      var client = this._page._delegate._mainFrameSession._client;
+    }
+    // Obtaining the objectId for the document
+    const documentNode = await client.send('Runtime.evaluate', { // https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-evaluate
+      expression: "document",
+      serializationOptions: {
+        serialization: "idOnly"
+      },
+      contextId: context.delegate._contextId
+    });
+    // _debugLogger.debugLogger.log('api', \`PVM14 getClosedShadowRoots: documentNode.result.objectId = [\${documentNode.result.objectId}]\`);
+    // TODO:PVM14 Geting the whole document as deep as IFRAMEs security allows us ...
+    const describedScope = await client.send('DOM.describeNode', {
+      objectId: documentNode.result.objectId,
+      depth: -1,
+      pierce: true
+    });
+    // _debugLogger.debugLogger.log('api',\`PVM14 _customFindElementsByParsed: describedScope:\\n \${JSON.stringify(describedScope,null,2)}\\n\`);
+
+    // TODO:PVM14 Probably in the future refactor this repeated code ...
+    function findClosedShadowRoots(node, results = []) {
+      if (!node || typeof node !== 'object') return results;
+
+      // Check for shadow roots in the current node
+      if (node.shadowRoots && Array.isArray(node.shadowRoots)) {
+        for (const shadowRoot of node.shadowRoots) {
+          if (shadowRoot.shadowRootType === 'closed' && shadowRoot.backendNodeId) {
+//            _debugLogger.debugLogger.log('api', \`PVM14 getClosedShadowRoots: closed shadowRoot DETECTED shadowRoot.nodeName = \${
+//                  shadowRoot.nodeName} shadowRoot.backendNodeId=[\${shadowRoot.backendNodeId}] ... \`);
+            results.push(shadowRoot.backendNodeId);
+          }
+          findClosedShadowRoots(shadowRoot, results);
+        }
+      }
+
+      if (node.nodeName !== 'IFRAME' && node.children && Array.isArray(node.children)) {
+        for (const child of node.children) {
+          findClosedShadowRoots(child, results);
+        }
+      }
+      return results;
+    }
+
+    var shadowRootBackendIds = findClosedShadowRoots(describedScope.node);
+    // _debugLogger.debugLogger.log('api', \`PVM14 getClosedShadowRoots: shadowRootBackendIds.length = [\${shadowRootBackendIds.length}] ... \`);
+
+    var shadowRoots = [];
+    for (var shadowRootBackendId of shadowRootBackendIds) {
+      var resolvedShadowRoot = await client.send('DOM.resolveNode', { // https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-resolveNode
+        backendNodeId: shadowRootBackendId,
+        contextId: context.delegate._contextId
+      });
+      shadowRoots.push(new dom.ElementHandle(context, resolvedShadowRoot.object.objectId)); // https://playwright.dev/docs/api/class-elementhandle
+    }
+    // _debugLogger.debugLogger.log('api', \`PVM14 getClosedShadowRoots: shadowRoots.length = [\${shadowRoots.length}] ... \`);
+
+    return shadowRoots;
+`);
+
 // ----------------------------
 // server/chromium/crPage.ts
 // ----------------------------
