@@ -889,11 +889,11 @@ isVisibleInternalMethod.setBodyText(`try {
 }`)
 // -- querySelectorAll Method --
 const querySelectorAllMethod = frameClass.getMethod("querySelectorAll");
-querySelectorAllMethod.setBodyText(`/* Implementing the same logic as in 'queryCount': this function returns 'handles', 'queryCount' returns
-   'handles.length'. Before this modification this function invoked FrameSelectors.queryAll which I think
-   isn't used anymore ...
-*/
-const custom_metadata = {
+const querySelectorAllComment = `Implementing the same logic as in 'queryCount': this function returns 'handles', 'queryCount' returns
+'handles.length'. Before this modification this function invoked FrameSelectors.queryAll which I think
+isn't used anymore ...`;
+querySelectorAllMethod.addJsDoc(querySelectorAllComment);
+querySelectorAllMethod.setBodyText(`const custom_metadata = {
   "internal": false,
   "log": []
 };
@@ -909,7 +909,7 @@ return await controller.run(async progress => {
   // handles will be null. Otherwise, it's the array from the action (possibly empty).
   return handles === null ? [] : handles;
 });
-`)
+`);
 
 // -- queryCount Method --
 const queryCountlMethod = frameClass.getMethod("queryCount");
