@@ -2216,7 +2216,7 @@ const selectorsSourceFile = project.addSourceFileAtPath(
 const newImportModuleSpecifier = "./dom";
 const newImportNamedImport = "NonRecoverableDOMError";
 
-// Almost 15 lines of code to insert a simple import. There has to be a better way :-(
+// Fifteen lines of code to insert a simple import. There has to be a better way :-(
 let targetStatementIndex = 0; // Default to inserting at the beginning
 const importDeclarations = selectorsSourceFile.getImportDeclarations();
 
