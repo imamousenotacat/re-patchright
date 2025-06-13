@@ -1050,8 +1050,8 @@ while (parsed.parts.length > 0) {
       const describedScope = await client.send('DOM.describeNode', {
         objectId: scope._objectId,
         depth: -1,
-        pierce: true
-      });
+        pierce: true // This 'true' really pierces through closed shadowRoots but not iframes.
+      });            // It is not capable of overcoming the lack of the flag --disable-site-isolation-trials and that can bring problems ...
 
       // Elements Queryed in the "current round"
       var queryingElements = [];
@@ -1077,6 +1077,8 @@ while (parsed.parts.length > 0) {
 
         var shadowRootBackendIds = findClosedShadowRoots(describedScope.node);
         var shadowRoots = [];
+        // ESSENTIAL: Using 'DOM.resolveNode' you get a reference to the remote closed shadow root object THAT ALLOWS YOU TO OPERATE WITH IT
+        // using 'injected.querySelectorAll' BECAUSE ONCE YOU ARE 'POSITIONED' IN THE CLOSED SHADOW ROOT YOU CAN INSPECT INSIDE IT WITHOUT LIMITATIONS ...
         for (var shadowRootBackendId of shadowRootBackendIds) {
           var resolvedShadowRoot = await client.send('DOM.resolveNode', {
             backendNodeId: shadowRootBackendId,
@@ -1085,18 +1087,37 @@ while (parsed.parts.length > 0) {
           shadowRoots.push(new dom.ElementHandle(context, resolvedShadowRoot.object.objectId));
         }
 
-        for (var shadowRoot of shadowRoots) {
-          const shadowElements = await shadowRoot.evaluateHandleInUtility(([injected, node, { parsed, callId }]) => {
-            const elements = injected.querySelectorAll(parsed, node);
-            if (callId) injected.markTargetElements(new Set(elements), callId);
-            return elements
-          }, {
-            parsed: parsedEdits,
-            callId: progress.metadata.id
-          });
+        /* TODO: PVM14 Ugly as hell and potentially imperfect specific solution for the "> *" locator.
+            It aims to prevent duplicate counting by focusing only on first-level children.
+            Recursively obtained closed shadowRoots are ignored unless the current
+            scope is the shadowRoot's host, where shadowRoots are the direct children we are looking for. */
+        var firstSimple = parsedEdits?.parts?.[0]?.body?.[0]?.simples?.[0];
+        var lookingForDirectChildElementsOfCurrentElement = firstSimple?.selector?.functions?.[0]?.name === "scope" && firstSimple?.combinator === ">";
 
-          const shadowElementsAmount = await shadowElements.getProperty("length");
-          queryingElements.push([shadowElements, shadowElementsAmount, shadowRoot]);
+        /* NOW COMES THE IMPORTANT PART:
+            => BASIC, THIS IS ABLE TO INTROSPECT closed shadowRoot BECAUSE IT EXECUTES querySelectorAll SPECIFICALLY TARGETING SUCH NODES. */
+        for (var shadowRoot of shadowRoots) {
+          const hostOfShadowRootHandle = await shadowRoot.evaluateHandle(sr => sr.host);
+          const describedHostNode = await client.send('DOM.describeNode', { objectId: hostOfShadowRootHandle._objectId });
+          const hostOfShadowRootBackendNodeId = describedHostNode.node.backendNodeId;
+          const isScopeTheHost = scope.backendNodeId === hostOfShadowRootBackendNodeId;
+          await hostOfShadowRootHandle.dispose();
+
+         if (!lookingForDirectChildElementsOfCurrentElement || isScopeTheHost) {
+            const shadowElements = await shadowRoot.evaluateHandleInUtility(([injected, node, {
+              parsed,
+              callId
+            }]) => {
+              const elements = injected.querySelectorAll(parsed, node);
+              if (callId) injected.markTargetElements(new Set(elements), callId);
+              return elements;
+            }, {
+              parsed: parsedEdits,
+              callId: progress.metadata.id
+            });
+            const shadowElementsAmount = await shadowElements.getProperty("length");
+            queryingElements.push([shadowElements, shadowElementsAmount, shadowRoot]);
+          }
         }
       }
 
@@ -1140,7 +1161,7 @@ while (parsed.parts.length > 0) {
   currentScopingElements = [];
   for (var element of elements) {
     var elemIndex = element.backendNodeId;
-    // Sorting the Elements by their occourance in the DOM
+    // Sorting the Elements by their occurrence in the DOM
     var elemPos = elementsIndexes.findIndex(index => index > elemIndex);
 
     // Sort the elements by their backendNodeId
