@@ -1,1730 +1,36 @@
 # NOTE: This patch file is generated automatically and is not used, it is only for documentation. The driver is actually patched using [patchright_driver_patch](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/blob/main/patchright_driver_patch.js), see [the workflow](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/blob/main/.github/workflows/patchright_workflow.yml)
-diff -ruN playwright/node_modules/playwright-core/src/server/bidi/bidiPage.ts patchright/node_modules/playwright-core/src/server/bidi/bidiPage.ts
---- playwright/node_modules/playwright-core/src/server/bidi/bidiPage.ts	2025-04-04 17:57:52.532067077 +0000
-+++ patchright/node_modules/playwright-core/src/server/bidi/bidiPage.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -376,7 +376,7 @@
-       this._initScriptIds.push(script);
-   }
- 
--  async removeNonInternalInitScripts() {
-+  async removeInitScripts() {
-     const promises = this._initScriptIds.map(script => this._session.send('script.removePreloadScript', { script }));
-     this._initScriptIds = [];
-     await Promise.all(promises);
-diff -ruN playwright/node_modules/playwright-core/src/server/browserContext.ts patchright/node_modules/playwright-core/src/server/browserContext.ts
---- playwright/node_modules/playwright-core/src/server/browserContext.ts	2025-04-04 17:57:52.532067077 +0000
-+++ patchright/node_modules/playwright-core/src/server/browserContext.ts	2025-04-04 17:57:59.080107462 +0000
-@@ -150,7 +150,7 @@
-     if (debugMode() === 'console')
-       await this.extendInjectedScript(consoleApiSource.source);
-     if (this._options.serviceWorkers === 'block')
--      await this.addInitScript(`\nif (navigator.serviceWorker) navigator.serviceWorker.register = async () => { console.warn('Service Worker registration blocked by Playwright'); };\n`);
-+      await this.addInitScript(`navigator.serviceWorker.register = async () => { };`);
- 
-     if (this._options.permissions)
-       await this.grantPermissions(this._options.permissions);
-@@ -333,16 +333,15 @@
-     }
-     const binding = new PageBinding(name, playwrightBinding, needsHandle);
-     this._pageBindings.set(name, binding);
--    await this.doAddInitScript(binding.initScript);
--    const frames = this.pages().map(page => page.frames()).flat();
--    await Promise.all(frames.map(frame => frame.evaluateExpression(binding.initScript.source).catch(e => {})));
-+    await this.doExposeBinding(binding);
-   }
- 
-   async _removeExposedBindings() {
--    for (const [key, binding] of this._pageBindings) {
--      if (!binding.internal)
-+    for (const key of this._pageBindings.keys()) {
-+      if (!key.startsWith('__pw'))
-         this._pageBindings.delete(key);
-     }
-+    await this.doRemoveExposedBindings();
-   }
- 
-   async grantPermissions(permissions: string[], origin?: string) {
-@@ -431,8 +430,8 @@
-   }
- 
-   async _removeInitScripts(): Promise<void> {
--    this.initScripts = this.initScripts.filter(script => script.internal);
--    await this.doRemoveNonInternalInitScripts();
-+    this.initScripts.splice(0, this.initScripts.length);
-+    await this.doRemoveInitScripts();
-   }
- 
-   async setRequestInterceptor(handler: network.RouteHandler | undefined): Promise<void> {
-diff -ruN playwright/node_modules/playwright-core/src/server/chromium/chromiumSwitches.ts patchright/node_modules/playwright-core/src/server/chromium/chromiumSwitches.ts
---- playwright/node_modules/playwright-core/src/server/chromium/chromiumSwitches.ts	2025-04-04 17:57:52.532067077 +0000
-+++ patchright/node_modules/playwright-core/src/server/chromium/chromiumSwitches.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -58,27 +58,16 @@
-   '--disable-field-trial-config', // https://source.chromium.org/chromium/chromium/src/+/main:testing/variations/README.md
-   '--disable-background-networking',
-   '--disable-background-timer-throttling',
--  '--disable-backgrounding-occluded-windows',
--  '--disable-back-forward-cache', // Avoids surprises like main request not being intercepted during page.goBack().
--  '--disable-breakpad',
--  '--disable-client-side-phishing-detection',
--  '--disable-component-extensions-with-background-pages',
--  '--disable-component-update', // Avoids unneeded network activity after startup.
-+  '--disable-backgrounding-occluded-windows', // Avoids surprises like main request not being intercepted during page.goBack().
-+  '--disable-breakpad', // Avoids unneeded network activity after startup.
-   '--no-default-browser-check',
--  '--disable-default-apps',
-   '--disable-dev-shm-usage',
--  '--disable-extensions',
-   '--disable-features=' + disabledFeatures.join(','),
--  '--allow-pre-commit-input',
-   '--disable-hang-monitor',
--  '--disable-ipc-flooding-protection',
--  '--disable-popup-blocking',
-   '--disable-prompt-on-repost',
-   '--disable-renderer-backgrounding',
-   '--force-color-profile=srgb',
--  '--metrics-recording-only',
-   '--no-first-run',
--  '--enable-automation',
-   '--password-store=basic',
-   '--use-mock-keychain',
-   // See https://chromium-review.googlesource.com/c/chromium/src/+/2436773
-@@ -86,6 +75,5 @@
-   '--export-tagged-pdf',
-   // https://chromium-review.googlesource.com/c/chromium/src/+/4853540
-   '--disable-search-engine-choice-screen',
--  // https://issues.chromium.org/41491762
--  '--unsafely-disable-devtools-self-xss-warnings',
-+  '--disable-blink-features=AutomationControlled'
- ];
-diff -ruN playwright/node_modules/playwright-core/src/server/chromium/crBrowser.ts patchright/node_modules/playwright-core/src/server/chromium/crBrowser.ts
---- playwright/node_modules/playwright-core/src/server/chromium/crBrowser.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/node_modules/playwright-core/src/server/chromium/crBrowser.ts	2025-04-04 17:57:59.082107474 +0000
-@@ -474,11 +474,6 @@
-       await (page._delegate as CRPage).addInitScript(initScript);
-   }
- 
--  async doRemoveNonInternalInitScripts() {
--    for (const page of this.pages())
--      await (page._delegate as CRPage).removeNonInternalInitScripts();
--  }
--
-   async doUpdateRequestInterception(): Promise<void> {
-     for (const page of this.pages())
-       await (page._delegate as CRPage).updateRequestInterception();
-@@ -578,4 +573,16 @@
-     const rootSession = await this._browser._clientRootSession();
-     return rootSession.attachToTarget(targetId);
-   }
-+
-+  async doRemoveInitScripts() {
-+    for (const page of this.pages()) await (page._delegate as CRPage).removeInitScripts();
-+  }
-+
-+  async doExposeBinding(binding: PageBinding) {
-+    for (const page of this.pages()) await (page._delegate as CRPage).exposeBinding(binding);
-+  }
-+
-+  async doRemoveExposedBindings() {
-+    for (const page of this.pages()) await (page._delegate as CRPage).removeExposedBindings();
-+  }
- }
-diff -ruN playwright/node_modules/playwright-core/src/server/chromium/crDevTools.ts patchright/node_modules/playwright-core/src/server/chromium/crDevTools.ts
---- playwright/node_modules/playwright-core/src/server/chromium/crDevTools.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/node_modules/playwright-core/src/server/chromium/crDevTools.ts	2025-04-04 17:57:59.082107474 +0000
-@@ -67,7 +67,6 @@
-       }).catch(e => null);
-     });
-     Promise.all([
--      session.send('Runtime.enable'),
-       session.send('Runtime.addBinding', { name: kBindingName }),
-       session.send('Page.enable'),
-       session.send('Page.addScriptToEvaluateOnNewDocument', { source: `
-diff -ruN playwright/node_modules/playwright-core/src/server/chromium/crNetworkManager.ts patchright/node_modules/playwright-core/src/server/chromium/crNetworkManager.ts
---- playwright/node_modules/playwright-core/src/server/chromium/crNetworkManager.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/node_modules/playwright-core/src/server/chromium/crNetworkManager.ts	2025-04-04 17:57:59.082107474 +0000
-@@ -1,3 +1,5 @@
-+// undetected-undetected_playwright-patch - custom imports
-+import crypto from 'crypto';
- /**
-  * Copyright 2017 Google Inc. All rights reserved.
-  * Modifications copyright (c) Microsoft Corporation.
-@@ -156,7 +158,7 @@
-     const enabled = this._protocolRequestInterceptionEnabled;
-     if (initial && !enabled)
-       return;
--    const cachePromise = info.session.send('Network.setCacheDisabled', { cacheDisabled: enabled });
-+    const cachePromise = info.session.send('Network.setCacheDisabled', { cacheDisabled: false });
-     let fetchPromise = Promise.resolve<any>(undefined);
-     if (!info.workerFrame) {
-       if (enabled)
-@@ -238,6 +240,7 @@
-   }
- 
-   _onRequestPaused(sessionInfo: SessionInfo, event: Protocol.Fetch.requestPausedPayload) {
-+    if (this._alreadyTrackedNetworkIds.has(event.networkId)) return;
-     if (!event.networkId) {
-       // Fetch without networkId means that request was not recognized by inspector, and
-       // it will never receive Network.requestWillBeSent. Continue the request to not affect it.
-@@ -276,6 +279,7 @@
-   }
- 
-   _onRequest(requestWillBeSentSessionInfo: SessionInfo, requestWillBeSentEvent: Protocol.Network.requestWillBeSentPayload, requestPausedSessionInfo: SessionInfo | undefined, requestPausedEvent: Protocol.Fetch.requestPausedPayload | undefined) {
-+    if (this._alreadyTrackedNetworkIds.has(requestWillBeSentEvent.initiator.requestId)) return;
-     if (requestWillBeSentEvent.request.url.startsWith('data:'))
-       return;
-     let redirectedFrom: InterceptableRequest | null = null;
-@@ -342,7 +346,7 @@
-         headersOverride = redirectedFrom?._originalRequestRoute?._alreadyContinuedParams?.headers;
-         requestPausedSessionInfo!.session._sendMayFail('Fetch.continueRequest', { requestId: requestPausedEvent.requestId, headers: headersOverride });
-       } else {
--        route = new RouteImpl(requestPausedSessionInfo!.session, requestPausedEvent.requestId);
-+        route = new RouteImpl(requestPausedSessionInfo!.session, requestPausedEvent.requestId, this._page, requestPausedEvent.networkId, this);
-       }
-     }
-     const isNavigationRequest = requestWillBeSentEvent.requestId === requestWillBeSentEvent.loaderId && requestWillBeSentEvent.type === 'Document';
-@@ -547,6 +551,8 @@
-     if (request.session !== sessionInfo.session && !sessionInfo.isMain && request._documentId === request._requestId)
-       request.session = sessionInfo.session;
-   }
-+
-+  _alreadyTrackedNetworkIds: Set<string> = new Set();
- }
- 
- class InterceptableRequest {
-@@ -606,32 +612,82 @@
-   _alreadyContinuedParams: Protocol.Fetch.continueRequestParameters | undefined;
-   _fulfilled: boolean = false;
- 
--  constructor(session: CRSession, interceptionId: string) {
-+  constructor(session: CRSession, interceptionId: string, page: Page, networkId, sessionManager) {
-+    this._sessionManager = void 0;
-+    this._networkId = void 0;
-+    this._page = void 0;
-     this._session = session;
-     this._interceptionId = interceptionId;
-+    this._page = page;
-+    this._networkId = networkId;
-+    this._sessionManager = sessionManager;
-+    eventsHelper.addEventListener(this._session, 'Fetch.requestPaused', async e => await this._networkRequestIntercepted(e));
-   }
- 
-   async continue(overrides: types.NormalizedContinueOverrides): Promise<void> {
-     this._alreadyContinuedParams = {
--      requestId: this._interceptionId!,
-+      requestId: this._interceptionId,
-       url: overrides.url,
-       headers: overrides.headers,
-       method: overrides.method,
--      postData: overrides.postData ? overrides.postData.toString('base64') : undefined
-+      postData: overrides.postData ? overrides.postData.toString('base64') : undefined,
-     };
--    await catchDisallowedErrors(async () => {
--      await this._session.send('Fetch.continueRequest', this._alreadyContinuedParams);
--    });
-+    if (overrides.url && (overrides.url === 'http://patchright-init-script-inject.internal/' || overrides.url === 'https://patchright-init-script-inject.internal/')) {
-+      await catchDisallowedErrors(async () => {
-+        this._sessionManager._alreadyTrackedNetworkIds.add(this._networkId);
-+        this._session.send('Fetch.continueRequest', { requestId: this._interceptionId, interceptResponse: true });
-+      }) ;
-+    } else {
-+      await catchDisallowedErrors(async () => {
-+        await this._session.send('Fetch.continueRequest', this._alreadyContinuedParams);
-+      });
-+    }
-   }
- 
-   async fulfill(response: types.NormalizedFulfillResponse) {
-+    const isTextHtml = response.resourceType === 'Document' || response.headers.some(header => header.name === 'content-type' && header.value.includes('text/html'));
-+    var allInjections = [...this._page._delegate._mainFrameSession._evaluateOnNewDocumentScripts];
-+        for (const binding of this._page._delegate._browserContext._pageBindings.values()) {
-+          if (!allInjections.includes(binding)) allInjections.push(binding);
-+        }
-+    if (isTextHtml && allInjections.length) {
-+      // I Chatted so hard for this Code
-+      let scriptNonce = crypto.randomBytes(22).toString('hex');
-+      for (let i = 0; i < response.headers.length; i++) {
-+        if (response.headers[i].name === 'content-security-policy' || response.headers[i].name === 'content-security-policy-report-only') {
-+          // Search for an existing script-src nonce that we can hijack
-+          let cspValue = response.headers[i].value;
-+          const nonceRegex = /script-src[^;]*'nonce-([\w-]+)'/;
-+          const nonceMatch = cspValue.match(nonceRegex);
-+          if (nonceMatch) {
-+            scriptNonce = nonceMatch[1];
-+          } else {
-+            // Add the new nonce value to the script-src directive
-+            const scriptSrcRegex = /(script-src[^;]*)(;|$)/;
-+            const newCspValue = cspValue.replace(scriptSrcRegex, `$1 'nonce-${scriptNonce}'$2`);
-+            response.headers[i].value = newCspValue;
-+          }
-+          break;
-+        }
+Binary files playwright/.git/index and patchright/.git/index differ
+diff -ruN playwright/babel.config.json patchright/babel.config.json
+--- playwright/babel.config.json	2025-06-14 21:50:45.282205800 +0200
++++ patchright/babel.config.json	2025-06-14 21:53:14.120912300 +0200
+@@ -3,15 +3,19 @@
+     "setPublicClassFields": true
+   },
+   "plugins": [
+-    ["@babel/plugin-transform-typescript", { "allowDeclareFields": true } ],
++    [
++      "@babel/plugin-transform-typescript",
++      {
++        "allowDeclareFields": true
 +      }
-+      let injectionHTML = "";
-+      allInjections.forEach((script) => {
-+        let scriptId = crypto.randomBytes(22).toString('hex');
-+        injectionHTML += `<script class="${this._page._delegate.initScriptTag}" nonce="${scriptNonce}" type="text/javascript">document.getElementById("${scriptId}")?.remove();${script.source}</script>`;
-+      });
-+      if (response.isBase64) {
-+        response.isBase64 = false;
-+        response.body = injectionHTML + Buffer.from(response.body, 'base64').toString('utf-8');
-+      } else {
-+        response.body = injectionHTML + response.body;
-+      }
-+    }
-     this._fulfilled = true;
-     const body = response.isBase64 ? response.body : Buffer.from(response.body).toString('base64');
--
-     const responseHeaders = splitSetCookieHeader(response.headers);
-     await catchDisallowedErrors(async () => {
-       await this._session.send('Fetch.fulfillRequest', {
--        requestId: this._interceptionId!,
-+        requestId: response.interceptionId ? response.interceptionId : this._interceptionId,
-         responseCode: response.status,
-         responsePhrase: network.statusText(response.status),
-         responseHeaders,
-@@ -650,6 +706,33 @@
-       });
-     });
-   }
-+
-+  async _networkRequestIntercepted(event) {
-+    if (event.resourceType !== 'Document') {
-+      /*await catchDisallowedErrors(async () => {
-+        await this._session.send('Fetch.continueRequest', { requestId: event.requestId });
-+      });*/
-+      return;
-+    }
-+    if (this._networkId != event.networkId || !this._sessionManager._alreadyTrackedNetworkIds.has(event.networkId)) return;
-+    try {
-+      if (event.responseStatusCode >= 301 && event.responseStatusCode <= 308  || (event.redirectedRequestId && !event.responseStatusCode)) {
-+        await this._session.send('Fetch.continueRequest', { requestId: event.requestId, interceptResponse: true });
-+      } else {
-+        const responseBody = await this._session.send('Fetch.getResponseBody', { requestId: event.requestId });
-+        await this.fulfill({
-+          headers: event.responseHeaders,
-+          isBase64: true,
-+          body: responseBody.body,
-+          status: event.responseStatusCode,
-+          interceptionId: event.requestId,
-+          resourceType: event.resourceType,
-+        })
-+      }
-+    } catch (error) {
-+      await this._session._sendMayFail('Fetch.continueRequest', { requestId: event.requestId });
-+    }
-+  }
- }
- 
- // In certain cases, protocol will return error if the request was already canceled
-diff -ruN playwright/node_modules/playwright-core/src/server/chromium/crPage.ts patchright/node_modules/playwright-core/src/server/chromium/crPage.ts
---- playwright/node_modules/playwright-core/src/server/chromium/crPage.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/node_modules/playwright-core/src/server/chromium/crPage.ts	2025-04-04 17:57:59.082107474 +0000
-@@ -1,3 +1,5 @@
-+// undetected-undetected_playwright-patch - custom imports
-+import crypto from 'crypto';
- /**
-  * Copyright 2017 Google Inc. All rights reserved.
-  * Modifications copyright (c) Microsoft Corporation.
-@@ -101,7 +103,8 @@
-     this.updateOffline();
-     this.updateExtraHTTPHeaders();
-     this.updateHttpCredentials();
--    this.updateRequestInterception();
-+    this._networkManager.setRequestInterception(true);
-+    this.initScriptTag = crypto.randomBytes(20).toString('hex');
-     this._mainFrameSession = new FrameSession(this, client, targetId, null);
-     this._sessions.set(targetId, this._mainFrameSession);
-     if (opener && !browserContext._options.noDefaultViewport) {
-@@ -231,10 +234,11 @@
-   }
- 
-   async addInitScript(initScript: InitScript, world: types.World = 'main'): Promise<void> {
-+    this._page.initScripts.push(initScript);
-     await this._forAllFrameSessions(frame => frame._evaluateOnNewDocument(initScript, world));
-   }
- 
--  async removeNonInternalInitScripts() {
-+  async removeInitScripts() {
-     await this._forAllFrameSessions(frame => frame._removeEvaluatesOnNewDocument());
-   }
- 
-@@ -365,6 +369,15 @@
-   shouldToggleStyleSheetToSyncAnimations(): boolean {
-     return false;
-   }
-+
-+  async exposeBinding(binding) {
-+    await this._forAllFrameSessions(frame => frame._initBinding(binding));
-+    await Promise.all(this._page.frames().map(frame => frame.evaluateExpression(binding.source).catch(e => {})));
-+  }
-+
-+  async removeExposedBindings() {
-+    await this._forAllFrameSessions(frame => frame._removeExposedBindings());
-+  }
- }
- 
- class FrameSession {
-@@ -479,19 +492,6 @@
-           this._handleFrameTree(frameTree);
-           this._addRendererListeners();
-         }
--
--        const localFrames = this._isMainFrame() ? this._page.frames() : [this._page._frameManager.frame(this._targetId)!];
--        for (const frame of localFrames) {
--          // Note: frames might be removed before we send these.
--          this._client._sendMayFail('Page.createIsolatedWorld', {
--            frameId: frame._id,
--            grantUniveralAccess: true,
--            worldName: UTILITY_WORLD_NAME,
--          });
--          for (const initScript of this._crPage._page.allInitScripts())
--            frame.evaluateExpression(initScript.source).catch(e => {});
--        }
--
-         const isInitialEmptyPage = this._isMainFrame() && this._page.mainFrame().url() === ':';
-         if (isInitialEmptyPage) {
-           // Ignore lifecycle events, worlds and bindings for the initial empty page. It is never the final page
-@@ -501,14 +501,20 @@
-             this._eventListeners.push(eventsHelper.addEventListener(this._client, 'Page.lifecycleEvent', event => this._onLifecycleEvent(event)));
-           });
-         } else {
-+          const localFrames = this._isMainFrame() ? this._page.frames() : [this._page._frameManager.frame(this._targetId)!];
-+          for (const frame of localFrames) {
-+            this._page._frameManager.frame(frame._id)._context("utility");
-+            for (const binding of this._crPage._browserContext._pageBindings.values())
-+              frame.evaluateExpression(binding.source).catch(e => {});
-+            for (const source of this._crPage._browserContext.initScripts)
-+              frame.evaluateExpression(source).catch(e => {});
-+          }
-           this._firstNonInitialNavigationCommittedFulfill();
-           this._eventListeners.push(eventsHelper.addEventListener(this._client, 'Page.lifecycleEvent', event => this._onLifecycleEvent(event)));
-         }
-       }),
-       this._client.send('Log.enable', {}),
-       lifecycleEventsEnabled = this._client.send('Page.setLifecycleEventsEnabled', { enabled: true }),
--      this._client.send('Runtime.enable', {}),
--      this._client.send('Runtime.addBinding', { name: PageBinding.kPlaywrightBinding }),
-       this._client.send('Page.addScriptToEvaluateOnNewDocument', {
-         source: '',
-         worldName: UTILITY_WORLD_NAME,
-@@ -541,14 +547,16 @@
-       promises.push(this._updateGeolocation(true));
-       promises.push(this._updateEmulateMedia());
-       promises.push(this._updateFileChooserInterception(true));
--      for (const initScript of this._crPage._page.allInitScripts())
--        promises.push(this._evaluateOnNewDocument(initScript, 'main'));
-+      for (const binding of this._crPage._page.allBindings()) promises.push(this._initBinding(binding));
-+      for (const initScript of this._crPage._browserContext.initScripts) promises.push(this._evaluateOnNewDocument(initScript, 'main'));
-+      for (const initScript of this._crPage._page.initScripts) promises.push(this._evaluateOnNewDocument(initScript, 'main'));
-       if (screencastOptions)
-         promises.push(this._startVideoRecording(screencastOptions));
-     }
--    promises.push(this._client.send('Runtime.runIfWaitingForDebugger'));
-+    if (!(this._crPage._page._pageBindings.size || this._crPage._browserContext._pageBindings.size)) promises.push(this._client.send('Runtime.runIfWaitingForDebugger'));
-     promises.push(this._firstNonInitialNavigationCommittedPromise);
-     await Promise.all(promises);
-+    if (this._crPage._page._pageBindings.size || this._crPage._browserContext._pageBindings.size) await this._client.send('Runtime.runIfWaitingForDebugger');
-   }
- 
-   dispose() {
-@@ -565,18 +573,31 @@
- 
-   async _navigate(frame: frames.Frame, url: string, referrer: string | undefined): Promise<frames.GotoResult> {
-     const response = await this._client.send('Page.navigate', { url, referrer, frameId: frame._id, referrerPolicy: 'unsafeUrl' });
-+    this._client._sendMayFail('Page.waitForDebugger');
-     if (response.errorText)
-       throw new frames.NavigationAbortedError(response.loaderId, `${response.errorText} at ${url}`);
-     return { newDocumentId: response.loaderId };
-   }
- 
--  _onLifecycleEvent(event: Protocol.Page.lifecycleEventPayload) {
-+  async _onLifecycleEvent(event: Protocol.Page.lifecycleEventPayload) {
-     if (this._eventBelongsToStaleFrame(event.frameId))
-       return;
-     if (event.name === 'load')
-       this._page._frameManager.frameLifecycleEvent(event.frameId, 'load');
-     else if (event.name === 'DOMContentLoaded')
-       this._page._frameManager.frameLifecycleEvent(event.frameId, 'domcontentloaded');
-+    await this._client._sendMayFail('Runtime.runIfWaitingForDebugger');
-+      var document = await this._client._sendMayFail("DOM.getDocument");
-+      if (!document) return
-+      var query = await this._client._sendMayFail("DOM.querySelectorAll", {
-+        nodeId: document.root.nodeId,
-+        selector: "[class=" + this._crPage.initScriptTag + "]"
-+      });
-+      if (!query) return
-+      for (const nodeId of query.nodeIds) await this._client._sendMayFail("DOM.removeNode", { nodeId: nodeId });
-+      await this._client._sendMayFail('Runtime.runIfWaitingForDebugger');
-+      // ensuring execution context
-+      try { await this._page._frameManager.frame(this._targetId)._context("utility") } catch { };
-   }
- 
-   _handleFrameTree(frameTree: Protocol.Page.FrameTree) {
-@@ -623,12 +644,24 @@
-     this._page._frameManager.frameAttached(frameId, parentFrameId);
-   }
- 
--  _onFrameNavigated(framePayload: Protocol.Page.Frame, initial: boolean) {
-+  async _onFrameNavigated(framePayload: Protocol.Page.Frame, initial: boolean) {
-     if (this._eventBelongsToStaleFrame(framePayload.id))
-       return;
-     this._page._frameManager.frameCommittedNewDocumentNavigation(framePayload.id, framePayload.url + (framePayload.urlFragment || ''), framePayload.name || '', framePayload.loaderId, initial);
-     if (!initial)
-       this._firstNonInitialNavigationCommittedFulfill();
-+    await this._client._sendMayFail('Runtime.runIfWaitingForDebugger');
-+      var document = await this._client._sendMayFail("DOM.getDocument");
-+      if (!document) return
-+      var query = await this._client._sendMayFail("DOM.querySelectorAll", {
-+        nodeId: document.root.nodeId,
-+        selector: "[class=" + this._crPage.initScriptTag + "]"
-+      });
-+      if (!query) return
-+      for (const nodeId of query.nodeIds) await this._client._sendMayFail("DOM.removeNode", { nodeId: nodeId });
-+      await this._client._sendMayFail('Runtime.runIfWaitingForDebugger');
-+      // ensuring execution context
-+      try { await this._page._frameManager.frame(this._targetId)._context("utility") } catch { };
-   }
- 
-   _onFrameRequestedNavigation(payload: Protocol.Page.frameRequestedNavigationPayload) {
-@@ -665,19 +698,24 @@
-   }
- 
-   _onExecutionContextCreated(contextPayload: Protocol.Runtime.ExecutionContextDescription) {
-+    for (const name of this._exposedBindingNames) this._client._sendMayFail('Runtime.addBinding', { name: name, executionContextId: contextPayload.id });
-     const frame = contextPayload.auxData ? this._page._frameManager.frame(contextPayload.auxData.frameId) : null;
-+    if (contextPayload.auxData.type == "worker") throw new Error("ExecutionContext is worker");
-     if (!frame || this._eventBelongsToStaleFrame(frame._id))
-       return;
-     const delegate = new CRExecutionContext(this._client, contextPayload);
--    let worldName: types.World|null = null;
--    if (contextPayload.auxData && !!contextPayload.auxData.isDefault)
--      worldName = 'main';
--    else if (contextPayload.name === UTILITY_WORLD_NAME)
--      worldName = 'utility';
-+    let worldName = contextPayload.name;
-     const context = new dom.FrameExecutionContext(delegate, frame, worldName);
-     if (worldName)
-       frame._contextCreated(worldName, context);
-     this._contextIdToContext.set(contextPayload.id, context);
-+    for (const source of this._exposedBindingScripts) {
-+      this._client._sendMayFail("Runtime.evaluate", {
-+        expression: source,
-+        contextId: contextPayload.id,
-+        awaitPromise: true,
-+      })
-+    }
-   }
- 
-   _onExecutionContextDestroyed(executionContextId: number) {
-@@ -693,7 +731,7 @@
-       this._onExecutionContextDestroyed(contextId);
-   }
- 
--  _onAttachedToTarget(event: Protocol.Target.attachedToTargetPayload) {
-+  async _onAttachedToTarget(event: Protocol.Target.attachedToTargetPayload) {
-     const session = this._client.createChildSession(event.sessionId);
- 
-     if (event.targetInfo.type === 'iframe') {
-@@ -725,8 +763,17 @@
-     session.once('Runtime.executionContextCreated', async event => {
-       worker._createExecutionContext(new CRExecutionContext(session, event.context));
-     });
-+    var globalThis = await session._sendMayFail('Runtime.evaluate', {
-+      expression: "globalThis",
-+      serializationOptions: { serialization: "idOnly" }
-+
-+    });
-+    if (globalThis && globalThis.result) {
-+      var globalThisObjId = globalThis.result.objectId;
-+      var executionContextId = parseInt(globalThisObjId.split('.')[1], 10);
-+      worker._createExecutionContext(new CRExecutionContext(session, { id: executionContextId }));
-+    }
-     // This might fail if the target is closed before we initialize.
--    session._sendMayFail('Runtime.enable');
-     // TODO: attribute workers to the right frame.
-     this._crPage._networkManager.addSession(session, this._page._frameManager.frame(this._targetId) ?? undefined).catch(() => {});
-     session._sendMayFail('Runtime.runIfWaitingForDebugger');
-@@ -805,8 +852,8 @@
-     const pageOrError = await this._crPage._page.waitForInitializedOrError();
-     if (!(pageOrError instanceof Error)) {
-       const context = this._contextIdToContext.get(event.executionContextId);
--      if (context)
--        await this._page._onBindingCalled(event.payload, context);
-+      if (context) await this._page._onBindingCalled(event.payload, context);
-+      else await this._page._onBindingCalled(event.payload, (await this._page.mainFrame()._mainContext())) // This might be a bit sketchy but it works for now
-     }
-   }
- 
-@@ -1052,16 +1099,11 @@
-   }
- 
-   async _evaluateOnNewDocument(initScript: InitScript, world: types.World): Promise<void> {
--    const worldName = world === 'utility' ? UTILITY_WORLD_NAME : undefined;
--    const { identifier } = await this._client.send('Page.addScriptToEvaluateOnNewDocument', { source: initScript.source, worldName });
--    if (!initScript.internal)
--      this._evaluateOnNewDocumentIdentifiers.push(identifier);
-+    this._evaluateOnNewDocumentScripts.push(initScript)
-   }
- 
-   async _removeEvaluatesOnNewDocument(): Promise<void> {
--    const identifiers = this._evaluateOnNewDocumentIdentifiers;
--    this._evaluateOnNewDocumentIdentifiers = [];
--    await Promise.all(identifiers.map(identifier => this._client.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })));
-+    this._evaluateOnNewDocumentScripts = [];
-   }
- 
-   async _getContentFrame(handle: dom.ElementHandle): Promise<frames.Frame | null> {
-@@ -1168,6 +1210,47 @@
-       throw new Error(dom.kUnableToAdoptErrorMessage);
-     return createHandle(to, result.object).asElement()!;
-   }
-+
-+  _exposedBindingNames: string[] = [];
-+  _evaluateOnNewDocumentScripts: string[] = [];
-+  _parsedExecutionContextIds: number[] = [];
-+  _exposedBindingScripts: string[] = [];
-+
-+  async _initBinding(binding = PageBinding) {
-+    var result = await this._client._sendMayFail('Page.createIsolatedWorld', {
-+      frameId: this._targetId, grantUniveralAccess: true, worldName: "utility"
-+    });
-+    if (!result) return
-+    var isolatedContextId = result.executionContextId
-+
-+    var globalThis = await this._client._sendMayFail('Runtime.evaluate', {
-+      expression: "globalThis",
-+      serializationOptions: { serialization: "idOnly" }
-+    });
-+    if (!globalThis) return
-+    var globalThisObjId = globalThis["result"]['objectId']
-+    var mainContextId = parseInt(globalThisObjId.split('.')[1], 10);
-+
-+    await Promise.all([
-+      this._client._sendMayFail('Runtime.addBinding', { name: binding.name }),
-+      this._client._sendMayFail('Runtime.addBinding', { name: binding.name, executionContextId: mainContextId }),
-+      this._client._sendMayFail('Runtime.addBinding', { name: binding.name, executionContextId: isolatedContextId }),
-+      // this._client._sendMayFail("Runtime.evaluate", { expression: binding.source, contextId: mainContextId, awaitPromise: true })
-+    ]);
-+    this._exposedBindingNames.push(binding.name);
-+    this._exposedBindingScripts.push(binding.source);
-+    await this._crPage.addInitScript(binding.source);
-+    //this._client._sendMayFail('Runtime.runIfWaitingForDebugger')
-+  }
-+
-+  async _removeExposedBindings() {
-+    const toRetain: string[] = [];
-+    const toRemove: string[] = [];
-+    for (const name of this._exposedBindingNames)
-+      (name.startsWith('__pw_') ? toRetain : toRemove).push(name);
-+    this._exposedBindingNames = toRetain;
-+    await Promise.all(toRemove.map(name => this._client.send('Runtime.removeBinding', { name })));
-+  }
- }
- 
- async function emulateLocale(session: CRSession, locale: string) {
-diff -ruN playwright/node_modules/playwright-core/src/server/chromium/crServiceWorker.ts patchright/node_modules/playwright-core/src/server/chromium/crServiceWorker.ts
---- playwright/node_modules/playwright-core/src/server/chromium/crServiceWorker.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/node_modules/playwright-core/src/server/chromium/crServiceWorker.ts	2025-04-04 17:57:59.083107480 +0000
-@@ -44,8 +44,6 @@
-       this.updateOffline();
-       this._networkManager.addSession(session, undefined, true /* isMain */).catch(() => {});
-     }
--
--    session.send('Runtime.enable', {}).catch(e => { });
-     session.send('Runtime.runIfWaitingForDebugger').catch(e => { });
-     session.on('Inspector.targetReloadedAfterCrash', () => {
-       // Resume service worker after restart.
-diff -ruN playwright/node_modules/playwright-core/src/server/clock.ts patchright/node_modules/playwright-core/src/server/clock.ts
---- playwright/node_modules/playwright-core/src/server/clock.ts	2025-04-04 17:57:52.534067090 +0000
-+++ patchright/node_modules/playwright-core/src/server/clock.ts	2025-04-04 17:57:59.080107462 +0000
-@@ -92,6 +92,14 @@
-   }
- 
-   private async _evaluateInFrames(script: string) {
-+    // Dont ask me why this works
-+    await Promise.all(this._browserContext.pages().map(async page => {
-+      await Promise.all(page.frames().map(async frame => {
-+        try {
-+          await frame.evaluateExpression("");
-+        } catch (e) {}
-+      }));
-+    }));
-     await this._browserContext.safeNonStallingEvaluateInAllFrames(script, 'main', { throwOnJSErrors: true });
-   }
- }
-diff -ruN playwright/node_modules/playwright-core/src/server/dispatchers/frameDispatcher.ts patchright/node_modules/playwright-core/src/server/dispatchers/frameDispatcher.ts
---- playwright/node_modules/playwright-core/src/server/dispatchers/frameDispatcher.ts	2025-04-04 17:57:52.535067096 +0000
-+++ patchright/node_modules/playwright-core/src/server/dispatchers/frameDispatcher.ts	2025-04-04 17:57:59.083107480 +0000
-@@ -84,11 +84,15 @@
-   }
- 
-   async evaluateExpression(params: channels.FrameEvaluateExpressionParams, metadata: CallMetadata): Promise<channels.FrameEvaluateExpressionResult> {
--    return { value: serializeResult(await this._frame.evaluateExpression(params.expression, { isFunction: params.isFunction }, parseArgument(params.arg))) };
-+    return { value: serializeResult(await this._frame.evaluateExpression(params.expression, { isFunction: params.isFunction,
-+      world: params.isolatedContext ? 'utility': 'main'
-+    }, parseArgument(params.arg))) };
-   }
- 
-   async evaluateExpressionHandle(params: channels.FrameEvaluateExpressionHandleParams, metadata: CallMetadata): Promise<channels.FrameEvaluateExpressionHandleResult> {
--    return { handle: ElementHandleDispatcher.fromJSHandle(this, await this._frame.evaluateExpressionHandle(params.expression, { isFunction: params.isFunction }, parseArgument(params.arg))) };
-+    return { handle: ElementHandleDispatcher.fromJSHandle(this, await this._frame.evaluateExpressionHandle(params.expression, { isFunction: params.isFunction,
-+      world: params.isolatedContext ? 'utility': 'main'
-+    }, parseArgument(params.arg))) };
-   }
- 
-   async waitForSelector(params: channels.FrameWaitForSelectorParams, metadata: CallMetadata): Promise<channels.FrameWaitForSelectorResult> {
-diff -ruN playwright/node_modules/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts patchright/node_modules/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts
---- playwright/node_modules/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts	2025-04-04 17:57:52.535067096 +0000
-+++ patchright/node_modules/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts	2025-04-04 17:57:59.083107480 +0000
-@@ -39,11 +39,11 @@
-   }
- 
-   async evaluateExpression(params: channels.JSHandleEvaluateExpressionParams): Promise<channels.JSHandleEvaluateExpressionResult> {
--    return { value: serializeResult(await this._object.evaluateExpression(params.expression, { isFunction: params.isFunction }, parseArgument(params.arg))) };
-+    return { value: serializeResult(await this._object.evaluateExpression(params.expression, { isFunction: params.isFunction }, parseArgument(params.arg), params.isolatedContext)) };
-   }
- 
-   async evaluateExpressionHandle(params: channels.JSHandleEvaluateExpressionHandleParams): Promise<channels.JSHandleEvaluateExpressionHandleResult> {
--    const jsHandle = await this._object.evaluateExpressionHandle(params.expression, { isFunction: params.isFunction }, parseArgument(params.arg));
-+    const jsHandle = await this._object.evaluateExpressionHandle(params.expression, { isFunction: params.isFunction }, parseArgument(params.arg), params.isolatedContext);
-     return { handle: ElementHandleDispatcher.fromJSHandle(this.parentScope(), jsHandle) };
-   }
- 
-diff -ruN playwright/node_modules/playwright-core/src/server/dispatchers/pageDispatcher.ts patchright/node_modules/playwright-core/src/server/dispatchers/pageDispatcher.ts
---- playwright/node_modules/playwright-core/src/server/dispatchers/pageDispatcher.ts	2025-04-04 17:57:52.535067096 +0000
-+++ patchright/node_modules/playwright-core/src/server/dispatchers/pageDispatcher.ts	2025-04-04 17:57:59.083107480 +0000
-@@ -353,11 +353,11 @@
-   }
- 
-   async evaluateExpression(params: channels.WorkerEvaluateExpressionParams, metadata: CallMetadata): Promise<channels.WorkerEvaluateExpressionResult> {
--    return { value: serializeResult(await this._object.evaluateExpression(params.expression, params.isFunction, parseArgument(params.arg))) };
-+    return { value: serializeResult(await this._object.evaluateExpression(params.expression, params.isFunction, parseArgument(params.arg), params.isolatedContext)) };
-   }
- 
-   async evaluateExpressionHandle(params: channels.WorkerEvaluateExpressionHandleParams, metadata: CallMetadata): Promise<channels.WorkerEvaluateExpressionHandleResult> {
--    return { handle: ElementHandleDispatcher.fromJSHandle(this, await this._object.evaluateExpressionHandle(params.expression, params.isFunction, parseArgument(params.arg))) };
-+    return { handle: ElementHandleDispatcher.fromJSHandle(this, await this._object.evaluateExpressionHandle(params.expression, params.isFunction, parseArgument(params.arg), params.isolatedContext)) };
-   }
- }
- 
-diff -ruN playwright/node_modules/playwright-core/src/server/firefox/ffPage.ts patchright/node_modules/playwright-core/src/server/firefox/ffPage.ts
---- playwright/node_modules/playwright-core/src/server/firefox/ffPage.ts	2025-04-04 17:57:52.536067102 +0000
-+++ patchright/node_modules/playwright-core/src/server/firefox/ffPage.ts	2025-04-04 17:57:59.084107486 +0000
-@@ -390,7 +390,7 @@
-     await this._session.send('Page.setInitScripts', { scripts: this._initScripts.map(s => ({ script: s.initScript.source, worldName: s.worldName })) });
-   }
- 
--  async removeNonInternalInitScripts() {
-+  async removeInitScripts() {
-     this._initScripts = this._initScripts.filter(s => s.initScript.internal);
-     await this._session.send('Page.setInitScripts', { scripts: this._initScripts.map(s => ({ script: s.initScript.source, worldName: s.worldName })) });
-   }
-diff -ruN playwright/node_modules/playwright-core/src/server/frames.ts patchright/node_modules/playwright-core/src/server/frames.ts
---- playwright/node_modules/playwright-core/src/server/frames.ts	2025-04-04 17:57:52.536067102 +0000
-+++ patchright/node_modules/playwright-core/src/server/frames.ts	2025-04-04 17:57:59.080107462 +0000
-@@ -1,3 +1,7 @@
-+// undetected-undetected_playwright-patch - custom imports
-+import { CRExecutionContext } from './chromium/crExecutionContext';
-+import { FrameExecutionContext } from './dom';
-+import crypto from 'crypto';
- /**
-  * Copyright 2017 Google Inc. All rights reserved.
-  * Modifications copyright (c) Microsoft Corporation.
-@@ -530,6 +534,9 @@
-   }
- 
-   _onClearLifecycle() {
-+    this._isolatedWorld = undefined;
-+    this._mainWorld = undefined;
-+    this._iframeWorld = undefined;
-     for (const event of this._firedLifecycleEvents)
-       this.emit(Frame.Events.RemoveLifecycle, event);
-     this._firedLifecycleEvents.clear();
-@@ -743,12 +750,68 @@
-     return this._page._delegate.getFrameElement(this);
-   }
- 
--  _context(world: types.World): Promise<dom.FrameExecutionContext> {
--    return this._contextData.get(world)!.contextPromise.then(contextOrDestroyedReason => {
--      if (contextOrDestroyedReason instanceof js.ExecutionContext)
--        return contextOrDestroyedReason;
--      throw new Error(contextOrDestroyedReason.destroyedReason);
--    });
-+  async _context(world: types.World): Promise<dom.FrameExecutionContext> {
-+    /* await this._page._delegate._mainFrameSession._client._sendMayFail('DOM.enable');
-+        var globalDoc = await this._page._delegate._mainFrameSession._client._sendMayFail('DOM.getFrameOwner', { frameId: this._id });
-+        if (globalDoc) {
-+          await this._page._delegate._mainFrameSession._client._sendMayFail("DOM.resolveNode", { nodeId: globalDoc.nodeId })
-+        } */
-+
-+        // if (this.isDetached()) throw new Error('Frame was detached');
-+        try {
-+          var client = this._page._delegate._sessionForFrame(this)._client
-+        } catch (e) { var client = this._page._delegate._mainFrameSession._client }
-+        var iframeExecutionContextId = await this._getFrameMainFrameContextId(client)
-+
-+        if (world == "main") {
-+          // Iframe Only
-+          if (this != this._page.mainFrame() && iframeExecutionContextId && this._iframeWorld == undefined) {
-+            var executionContextId = iframeExecutionContextId
-+            var crContext = new CRExecutionContext(client, { id: executionContextId }, this._id)
-+            this._iframeWorld = new FrameExecutionContext(crContext, this, world)
-+            this._page._delegate._mainFrameSession._onExecutionContextCreated({
-+              id: executionContextId, origin: world, name: world, auxData: { isDefault: this === this._page.mainFrame(), type: 'isolated', frameId: this._id }
-+            })
-+          } else if (this._mainWorld == undefined) {
-+            var globalThis = await client._sendMayFail('Runtime.evaluate', {
-+              expression: "globalThis",
-+              serializationOptions: { serialization: "idOnly" }
-+            });
-+            if (!globalThis) { return }
-+            var globalThisObjId = globalThis["result"]['objectId']
-+            var executionContextId = parseInt(globalThisObjId.split('.')[1], 10);
-+
-+            var crContext = new CRExecutionContext(client, { id: executionContextId }, this._id)
-+            this._mainWorld = new FrameExecutionContext(crContext, this, world)
-+            this._page._delegate._mainFrameSession._onExecutionContextCreated({
-+              id: executionContextId, origin: world, name: world, auxData: { isDefault: this === this._page.mainFrame(), type: 'isolated', frameId: this._id }
-+            })
-+          }
-+        }
-+        if (world != "main" && this._isolatedWorld == undefined) {
-+          world = "utility"
-+          var result = await client._sendMayFail('Page.createIsolatedWorld', {
-+            frameId: this._id, grantUniveralAccess: true, worldName: world
-+          });
-+          if (!result) {
-+            // if (this.isDetached()) throw new Error("Frame was detached");
-+            return
-+          }
-+          var executionContextId = result.executionContextId
-+          var crContext = new CRExecutionContext(client, { id: executionContextId }, this._id)
-+          this._isolatedWorld = new FrameExecutionContext(crContext, this, world)
-+          this._page._delegate._mainFrameSession._onExecutionContextCreated({
-+            id: executionContextId, origin: world, name: world, auxData: { isDefault: this === this._page.mainFrame(), type: 'isolated', frameId: this._id }
-+          })
-+        }
-+
-+        if (world != "main") {
-+          return this._isolatedWorld;
-+        } else if (this != this._page.mainFrame() && iframeExecutionContextId) {
-+          return this._iframeWorld;
-+        } else {
-+          return this._mainWorld;
-+        }
-   }
- 
-   _mainContext(): Promise<dom.FrameExecutionContext> {
-@@ -796,58 +859,49 @@
-   }
- 
-   async waitForSelectorInternal(progress: Progress, selector: string, performActionPreChecks: boolean, options: types.WaitForElementOptions, scope?: dom.ElementHandle): Promise<dom.ElementHandle<Element> | null> {
--    const { state = 'visible' } = options;
--    const promise = this.retryWithProgressAndTimeouts(progress, [0, 20, 50, 100, 100, 500], async continuePolling => {
--      if (performActionPreChecks)
--        await this._page.performActionPreChecks(progress);
--
--      const resolved = await this.selectors.resolveInjectedForSelector(selector, options, scope);
--      progress.throwIfAborted();
--      if (!resolved) {
--        if (state === 'hidden' || state === 'detached')
--          return null;
--        return continuePolling;
--      }
--      const result = await resolved.injected.evaluateHandle((injected, { info, root }) => {
--        if (root && !root.isConnected)
--          throw injected.createStacklessError('Element is not attached to the DOM');
--        const elements = injected.querySelectorAll(info.parsed, root || document);
--        const element: Element | undefined  = elements[0];
--        const visible = element ? injected.utils.isElementVisible(element) : false;
--        let log = '';
--        if (elements.length > 1) {
--          if (info.strict)
--            throw injected.strictModeViolationError(info.parsed, elements);
--          log = `  locator resolved to ${elements.length} elements. Proceeding with the first one: ${injected.previewNode(elements[0])}`;
--        } else if (element) {
--          log = `  locator resolved to ${visible ? 'visible' : 'hidden'} ${injected.previewNode(element)}`;
-+    const {
-+      state = 'visible'
-+    } = options;
-+    const promise = this._retryWithProgressIfNotConnected(progress, selector, options.strict, true, async handle => {
-+      const attached = !!handle;
-+      var visible = false;
-+      if (attached) {
-+        if (handle.parentNode.constructor.name == "ElementHandle") {
-+          visible = await handle.parentNode.evaluateInUtility(([injected, node, { handle }]) => {
-+            return handle ? injected.utils.isElementVisible(handle) : false;
-+          }, {
-+            handle
-+          });
-+        } else {
-+          visible = await handle.parentNode.evaluate((injected, { handle }) => {
-+            return handle ? injected.utils.isElementVisible(handle) : false;
-+          }, {
-+            handle
-+          });
-         }
--        return { log, element, visible, attached: !!element };
--      }, { info: resolved.info, root: resolved.frame === this ? scope : undefined });
--      const { log, visible, attached } = await result.evaluate(r => ({ log: r.log, visible: r.visible, attached: r.attached }));
--      if (log)
--        progress.log(log);
--      const success = { attached, detached: !attached, visible, hidden: !visible }[state];
-+      }
-+
-+      const success = {
-+        attached,
-+        detached: !attached,
-+        visible,
-+        hidden: !visible
-+      }[state];
-       if (!success) {
--        result.dispose();
--        return continuePolling;
-+        return "internal:continuepolling";
-       }
-       if (options.omitReturnValue) {
--        result.dispose();
-         return null;
-       }
--      const element = state === 'attached' || state === 'visible' ? await result.evaluateHandle(r => r.element) : null;
--      result.dispose();
--      if (!element)
--        return null;
--      if ((options as any).__testHookBeforeAdoptNode)
--        await (options as any).__testHookBeforeAdoptNode();
-+      const element = state === 'attached' || state === 'visible' ? handle : null;
-+      if (!element) return null;
-+      if (options.__testHookBeforeAdoptNode) await options.__testHookBeforeAdoptNode();
-       try {
--        return await element._adoptTo(await resolved.frame._mainContext());
-+        return element;
-       } catch (e) {
--        return continuePolling;
-+        return "internal:continuepolling";
-       }
--    });
-+    }, 'returnOnNotResolved');
-     return scope ? scope._context._raceAgainstContextDestroyed(promise) : promise;
-   }
- 
-@@ -886,7 +940,20 @@
-   }
- 
-   async queryCount(selector: string): Promise<number> {
--    return await this.selectors.queryCount(selector);
-+    const custom_metadata = {
-+      "internal": false,
-+      "log": []
-+    };
-+    const controller = new _progress.ProgressController(custom_metadata, this);
-+    return await controller.run(async progress => {
-+      progress.log("waiting for " + this._asLocator(selector));
-+      const promise = await this._retryWithProgressIfNotConnected(progress, selector, false, false, async result => {
-+        const handle = result[0];
-+        const handles = result[1];
-+        return handle ? handles.length : 0;
-+      }, 'returnAll');
-+      return promise;
-+    }, 100); // A bit geeky but its okay :D
-   }
- 
-   async content(): Promise<string> {
-@@ -908,31 +975,38 @@
-   }
- 
-   async setContent(metadata: CallMetadata, html: string, options: types.NavigateOptions = {}): Promise<void> {
--    const controller = new ProgressController(metadata, this);
--    return controller.run(async progress => {
--      await this.raceNavigationAction(progress, options, async () => {
--        const waitUntil = options.waitUntil === undefined ? 'load' : options.waitUntil;
--        progress.log(`setting frame content, waiting until "${waitUntil}"`);
--        const tag = `--playwright--set--content--${this._id}--${++this._setContentCounter}--`;
--        const context = await this._utilityContext();
--        const lifecyclePromise = new Promise((resolve, reject) => {
--          this._page._frameManager._consoleMessageTags.set(tag, () => {
--            // Clear lifecycle right after document.open() - see 'tag' below.
--            this._onClearLifecycle();
--            this._waitForLoadState(progress, waitUntil).then(resolve).catch(reject);
-+      const controller = new ProgressController(metadata, this);
-+      return controller.run(async progress => {
-+        await this.raceNavigationAction(progress, options, async () => {
-+          const waitUntil = options.waitUntil === undefined ? 'load' : options.waitUntil;
-+          progress.log(`setting frame content, waiting until "${waitUntil}"`);
-+          const tag = `--playwright--set--content--${this._id}--${++this._setContentCounter}--`;
-+          const bindingName = "_tagDebug" + crypto.randomBytes(20).toString('hex');
-+          const context = await this._utilityContext();
-+          await this._page._delegate._mainFrameSession._client.send('Runtime.addBinding', { name: bindingName });
-+          const lifecyclePromise = new Promise(async (resolve, reject) => {
-+            await this._page.exposeBinding(bindingName, false, (tag) => {
-+              this._onClearLifecycle();
-+              this._waitForLoadState(progress, waitUntil).then(resolve).catch(reject);
-+            });
-+          });
-+          const contentPromise = context.evaluate(({ html, tag, bindingName }) => {
-+            document.open();
-+            var _tagDebug = window[bindingName].bind({});
-+            delete window[bindingName]
-+            _tagDebug('{ "name": "' + bindingName + '", "seq": 1, "serializedArgs": ["' + tag + '"] }');
-+            console.debug(tag);  // eslint-disable-line no-console
-+            document.write(html);
-+            document.close();
-+          }, { html, tag,
-+            bindingName
-           });
-+          await Promise.all([contentPromise, lifecyclePromise]);
-+          return null;
-         });
--        const contentPromise = context.evaluate(({ html, tag }) => {
--          document.open();
--          console.debug(tag);  // eslint-disable-line no-console
--          document.write(html);
--          document.close();
--        }, { html, tag });
--        await Promise.all([contentPromise, lifecyclePromise]);
--        return null;
--      });
--    }, this._page._timeoutSettings.navigationTimeout(options));
--  }
-+      }, this._page._timeoutSettings.navigationTimeout(options));
-+    }
-+
- 
-   name(): string {
-     return this._name || '';
-@@ -1125,50 +1199,74 @@
-     selector: string,
-     strict: boolean | undefined,
-     performActionPreChecks: boolean,
--    action: (handle: dom.ElementHandle<Element>) => Promise<R | 'error:notconnected'>): Promise<R> {
--    progress.log(`waiting for ${this._asLocator(selector)}`);
-+    action: (handle: dom.ElementHandle<Element>) => Promise<R | 'error:notconnected'>, returnAction: boolean | undefined): Promise<R> {
-+    progress.log("waiting for " + this._asLocator(selector));
-     return this.retryWithProgressAndTimeouts(progress, [0, 20, 50, 100, 100, 500], async continuePolling => {
--      if (performActionPreChecks)
--        await this._page.performActionPreChecks(progress);
--
--      const resolved = await this.selectors.resolveInjectedForSelector(selector, { strict });
-+      if (performActionPreChecks) await this._page.performActionPreChecks(progress);
-+      const resolved = await this.selectors.resolveInjectedForSelector(selector, {
-+        strict
-+      });
-       progress.throwIfAborted();
--      if (!resolved)
-+      if (!resolved) {
-+        if (returnAction === 'returnOnNotResolved' || returnAction === 'returnAll') return null;
-+        return continuePolling;
-+      }
-+
-+      try {
-+        var client = this._page._delegate._sessionForFrame(resolved.frame)._client;
-+      } catch (e) {
-+        var client = this._page._delegate._mainFrameSession._client;
-+      }
-+      var context = await resolved.frame._context("main");
-+
-+      const documentNode = await client.send('Runtime.evaluate', {
-+        expression: "document",
-+        serializationOptions: {
-+          serialization: "idOnly"
-+        },
-+        contextId: context.delegate._contextId,
-+      });
-+      const documentScope = new dom.ElementHandle(context, documentNode.result.objectId);
-+
-+      const currentScopingElements = await this._customFindElementsByParsed(resolved, client, context, documentScope, progress, resolved.info.parsed);
-+      if (currentScopingElements.length == 0) {
-+        // TODO: Dispose?
-+        if (returnAction === 'returnOnNotResolved' || returnAction === 'returnAll') return null;
-         return continuePolling;
--      const result = await resolved.injected.evaluateHandle((injected, { info, callId }) => {
--        const elements = injected.querySelectorAll(info.parsed, document);
--        if (callId)
--          injected.markTargetElements(new Set(elements), callId);
--        const element = elements[0] as Element | undefined;
--        let log = '';
--        if (elements.length > 1) {
--          if (info.strict)
-+      }
-+      const resultElement = currentScopingElements[0];
-+      if (currentScopingElements.length > 1) {
-+        if (resolved.info.strict) {
-+          await resolved.injected.evaluateHandle((injected, {
-+            info,
-+            elements
-+          }) => {
-             throw injected.strictModeViolationError(info.parsed, elements);
--          log = `  locator resolved to ${elements.length} elements. Proceeding with the first one: ${injected.previewNode(elements[0])}`;
--        } else if (element) {
--          log = `  locator resolved to ${injected.previewNode(element)}`;
-+          }, {
-+            info: resolved.info,
-+            elements: currentScopingElements
-+          });
-         }
--        return { log, success: !!element, element };
--      }, { info: resolved.info, callId: progress.metadata.id });
--      const { log, success } = await result.evaluate(r => ({ log: r.log, success: r.success }));
--      if (log)
--        progress.log(log);
--      if (!success) {
--        result.dispose();
--        return continuePolling;
-+        progress.log("  locator resolved to " + currentScopingElements.length + " elements. Proceeding with the first one: " + resultElement.preview());
-+      } else if (resultElement) {
-+        progress.log("  locator resolved to " + resultElement.preview());
-       }
--      const element = await result.evaluateHandle(r => r.element) as dom.ElementHandle<Element>;
--      result.dispose();
-+
-       try {
--        const result = await action(element);
-+        var result = null;
-+        if (returnAction === 'returnAll') {
-+          result = await action([resultElement, currentScopingElements]);
-+        } else {
-+          result = await action(resultElement);
-+        }
-         if (result === 'error:notconnected') {
-           progress.log('element was detached from the DOM, retrying');
-           return continuePolling;
-+        } else if (result === 'internal:continuepolling') {
-+          return continuePolling;
-         }
-         return result;
--      } finally {
--        element?.dispose();
--      }
-+      } finally { }
-     });
-   }
- 
-@@ -1319,17 +1417,34 @@
- 
-   async isVisibleInternal(selector: string, options: types.StrictOptions = {}, scope?: dom.ElementHandle): Promise<boolean> {
-     try {
--      const resolved = await this.selectors.resolveInjectedForSelector(selector, options, scope);
--      if (!resolved)
--        return false;
--      return await resolved.injected.evaluate((injected, { info, root }) => {
--        const element = injected.querySelector(info.parsed, root || document, info.strict);
--        const state = element ? injected.elementState(element, 'visible') : { matches: false, received: 'error:notconnected' };
--        return state.matches;
--      }, { info: resolved.info, root: resolved.frame === this ? scope : undefined });
-+      const custom_metadata = { "internal": false, "log": [] };
-+      const controller = new ProgressController(custom_metadata, this);
-+      return await controller.run(async progress => {
-+        progress.log("waiting for " + this._asLocator(selector));
-+        const promise = this._retryWithProgressIfNotConnected(progress, selector, options.strict, false, async handle => {
-+          if (handle.parentNode.constructor.name == "ElementHandle") {
-+            return await handle.parentNode.evaluateInUtility(([injected, node, { handle }]) => {
-+              const state = handle ? injected.elementState(handle, 'visible') : {
-+                matches: false,
-+                received: 'error:notconnected'
-+              };
-+              return state.matches;
-+            }, { handle });
-+          } else {
-+            return await handle.parentNode.evaluate((injected, { handle }) => {
-+              const state = handle ? injected.elementState(handle, 'visible') : {
-+                matches: false,
-+                received: 'error:notconnected'
-+              };
-+              return state.matches;
-+            }, { handle });
-+          }
-+        });
-+
-+        return scope ? scope._context._raceAgainstContextDestroyed(promise) : promise;
-+      }, 100); // A bit geeky but its okay :D
-     } catch (e) {
--      if (js.isJavaScriptErrorInEvaluate(e) || isInvalidSelectorError(e) || isSessionClosedError(e))
--        throw e;
-+      if (js.isJavaScriptErrorInEvaluate(e) || isInvalidSelectorError(e) || isSessionClosedError(e)) throw e;
-       return false;
-     }
-   }
-@@ -1489,40 +1604,46 @@
-   }
- 
-   private async _expectInternal(progress: Progress, selector: string, options: FrameExpectParams, lastIntermediateResult: { received?: any, isSet: boolean }) {
--    const selectorInFrame = await this.selectors.resolveFrameForSelector(selector, { strict: true });
--    progress.throwIfAborted();
-+    progress.log("waiting for " + this._asLocator(selector));
-+    const isArray = options.expression === 'to.have.count' || options.expression.endsWith('.array');
- 
--    const { frame, info } = selectorInFrame || { frame: this, info: undefined };
--    const world = options.expression === 'to.have.property' ? 'main' : (info?.world ?? 'utility');
--    const context = await frame._context(world);
--    const injected = await context.injectedScript();
--    progress.throwIfAborted();
-+    const promise = await this._retryWithProgressIfNotConnected(progress, selector, !isArray, false, async result => {
-+      const handle = result[0];
-+      const handles = result[1];
-+
-+      if (handle.parentNode.constructor.name == "ElementHandle") {
-+        return await handle.parentNode.evaluateInUtility(async ([injected, node, { handle, options, handles }]) => {
-+          return await injected.expect(handle, options, handles);
-+        }, { handle, options, handles });
-+      } else {
-+        return await handle.parentNode.evaluate(async (injected, { handle, options, handles }) => {
-+          return await injected.expect(handle, options, handles);
-+        }, { handle, options, handles });
-+      }
-+    }, 'returnAll');
- 
--    const { log, matches, received, missingReceived } = await injected.evaluate(async (injected, { info, options, callId }) => {
--      const elements = info ? injected.querySelectorAll(info.parsed, document) : [];
--      if (callId)
--        injected.markTargetElements(new Set(elements), callId);
--      const isArray = options.expression === 'to.have.count' || options.expression.endsWith('.array');
--      let log = '';
--      if (isArray)
--        log = `  locator resolved to ${elements.length} element${elements.length === 1 ? '' : 's'}`;
--      else if (elements.length > 1)
--        throw injected.strictModeViolationError(info!.parsed, elements);
--      else if (elements.length)
--        log = `  locator resolved to ${injected.previewNode(elements[0])}`;
--      return { log, ...await injected.expect(elements[0], options, elements) };
--    }, { info, options, callId: progress.metadata.id });
--
--    if (log)
--      progress.log(log);
--    // Note: missingReceived avoids `unexpected value "undefined"` when element was not found.
-+    // Default Values, if no Elements found
-+    var matches = false;
-+    var received = 0;
-+    var missingReceived = null;
-+    if (promise) {
-+      matches = promise.matches;
-+      received = promise.received;
-+      missingReceived = promise.missingReceived;
-+    } else if (options.expectedNumber === 0) {
-+      matches = true;
-+    }
-+
-+    // Note: missingReceived avoids unexpected value "undefined" when element was not found.
-     if (matches === options.isNot) {
-       lastIntermediateResult.received = missingReceived ? '<element(s) not found>' : received;
-       lastIntermediateResult.isSet = true;
--      if (!missingReceived && !Array.isArray(received))
--        progress.log(`  unexpected value "${renderUnexpectedValue(options.expression, received)}"`);
-+      if (!missingReceived && !Array.isArray(received)) progress.log('  unexpected value "' + renderUnexpectedValue(options.expression, received) + '"');
-     }
--    return { matches, received };
-+    return {
-+      matches,
-+      received
-+    };
-   }
- 
-   async _waitForFunctionExpression<R>(metadata: CallMetadata, expression: string, isFunction: boolean | undefined, arg: any, options: types.WaitForFunctionOptions, world: types.World = 'main'): Promise<js.SmartHandle<R>> {
-@@ -1632,28 +1753,27 @@
-     const callbackText = body.toString();
-     const controller = new ProgressController(metadata, this);
-     return controller.run(async progress => {
--      progress.log(`waiting for ${this._asLocator(selector)}`);
--      const promise = this.retryWithProgressAndTimeouts(progress, [0, 20, 50, 100, 100, 500], async continuePolling => {
--        const resolved = await this.selectors.resolveInjectedForSelector(selector, options, scope);
--        progress.throwIfAborted();
--        if (!resolved)
--          return continuePolling;
--        const { log, success, value } = await resolved.injected.evaluate((injected, { info, callbackText, taskData, callId, root }) => {
--          const callback = injected.eval(callbackText) as ElementCallback<T, R>;
--          const element = injected.querySelector(info.parsed, root || document, info.strict);
--          if (!element)
--            return { success: false };
--          const log = `  locator resolved to ${injected.previewNode(element)}`;
--          if (callId)
--            injected.markTargetElements(new Set([element]), callId);
--          return { log, success: true, value: callback(injected, element, taskData as T) };
--        }, { info: resolved.info, callbackText, taskData, callId: progress.metadata.id, root: resolved.frame === this ? scope : undefined });
--
--        if (log)
--          progress.log(log);
--        if (!success)
--          return continuePolling;
--        return value!;
-+      progress.log("waiting for "+ this._asLocator(selector));
-+      const promise = this._retryWithProgressIfNotConnected(progress, selector, false, false, async handle => {
-+        if (handle.parentNode.constructor.name == "ElementHandle") {
-+          return await handle.parentNode.evaluateInUtility(([injected, node, { callbackText, handle, taskData }]) => {
-+            const callback = injected.eval(callbackText);
-+            return callback(injected, handle, taskData);
-+          }, {
-+            callbackText,
-+            handle,
-+            taskData
-+          });
-+        } else {
-+          return await handle.parentNode.evaluate((injected, { callbackText, handle, taskData }) => {
-+            const callback = injected.eval(callbackText);
-+            return callback(injected, handle, taskData);
-+          }, {
-+            callbackText,
-+            handle,
-+            taskData
-+          });
-+        }
-       });
-       return scope ? scope._context._raceAgainstContextDestroyed(promise) : promise;
-     }, this._page._timeoutSettings.timeout(options));
-@@ -1757,6 +1877,170 @@
-   private _asLocator(selector: string) {
-     return asLocator(this._page.attribution.playwright.options.sdkLanguage, selector);
-   }
-+
-+  _isolatedWorld: dom.FrameExecutionContext;
-+  _mainWorld: dom.FrameExecutionContext;
-+  _iframeWorld: dom.FrameExecutionContext;
-+
-+  async _getFrameMainFrameContextId(client): Promise<number> {
-+    try {
-+        var globalDocument = await client._sendMayFail("DOM.getFrameOwner", {frameId: this._id,});
-+        if (globalDocument && globalDocument.nodeId) {
-+          var describedNode = await client._sendMayFail("DOM.describeNode", {
-+            backendNodeId: globalDocument.backendNodeId,
-+          });
-+          if (describedNode) {
-+            var resolvedNode = await client._sendMayFail("DOM.resolveNode", {
-+              nodeId: describedNode.node.contentDocument.nodeId,
-+            });
-+            var _executionContextId = parseInt(resolvedNode.object.objectId.split(".")[1], 10);
-+            return _executionContextId;
-+            }
-+          }
-+        } catch (e) {}
-+        return 0;
-+  }
-+
-+  async _customFindElementsByParsed(resolved, client, context, documentScope, progress, parsed) {
-+    var parsedEdits = { ...parsed };
-+    // Note: We start scoping at document level
-+    var currentScopingElements = [documentScope];
-+    while (parsed.parts.length > 0) {
-+      var part = parsed.parts.shift();
-+      parsedEdits.parts = [part];
-+      var isUsingXPath = false;
-+      // Getting All Elements
-+      var elements = [];
-+      var elementsIndexes = [];
-+
-+      if (part.name == "xpath") {
-+        isUsingXPath = true;
-+      }
-+      if (part.name == "nth") {
-+        const partNth = Number(part.body);
-+        if (partNth > currentScopingElements.length || partNth < -currentScopingElements.length) {
-+          return continuePolling;
-+        } else {
-+          currentScopingElements = [currentScopingElements.at(partNth)];
-+          continue;
-+        }
-+      } else if (part.name == "internal:or") {
-+        var orredElements = await this._customFindElementsByParsed(resolved, client, context, documentScope, progress, part.body.parsed);
-+        elements = currentScopingElements.concat(orredElements);
-+      } else if (part.name == "internal:and") {
-+        var andedElements = await this._customFindElementsByParsed(resolved, client, context, documentScope, progress, part.body.parsed);
-+        const backendNodeIds = new Set(andedElements.map(item => item.backendNodeId));
-+        elements = currentScopingElements.filter(item => backendNodeIds.has(item.backendNodeId));
-+      } else {
-+        for (const scope of currentScopingElements) {
-+          const describedScope = await client.send('DOM.describeNode', {
-+            objectId: scope._objectId,
-+            depth: -1,
-+            pierce: true
-+          });
-+
-+          // Elements Queryed in the "current round"
-+          var queryingElements = [];
-+
-+          if (!isUsingXPath) {
-+            function findClosedShadowRoots(node, results = []) {
-+              if (!node || typeof node !== 'object') return results;
-+              if (node.shadowRoots && Array.isArray(node.shadowRoots)) {
-+                for (const shadowRoot of node.shadowRoots) {
-+                  if (shadowRoot.shadowRootType === 'closed' && shadowRoot.backendNodeId) {
-+                    results.push(shadowRoot.backendNodeId);
-+                  }
-+                  findClosedShadowRoots(shadowRoot, results);
-+                }
-+              }
-+              if (node.nodeName !== 'IFRAME' && node.children && Array.isArray(node.children)) {
-+                for (const child of node.children) {
-+                  findClosedShadowRoots(child, results);
-+                }
-+              }
-+              return results;
-+            }
-+
-+            var shadowRootBackendIds = findClosedShadowRoots(describedScope.node);
-+            var shadowRoots = [];
-+            for (var shadowRootBackendId of shadowRootBackendIds) {
-+              var resolvedShadowRoot = await client.send('DOM.resolveNode', {
-+                backendNodeId: shadowRootBackendId,
-+                contextId: context.delegate._contextId
-+              });
-+              shadowRoots.push(new dom.ElementHandle(context, resolvedShadowRoot.object.objectId));
-+            }
-+
-+            for (var shadowRoot of shadowRoots) {
-+              const shadowElements = await shadowRoot.evaluateHandleInUtility(([injected, node, { parsed, callId }]) => {
-+                const elements = injected.querySelectorAll(parsed, node);
-+                if (callId) injected.markTargetElements(new Set(elements), callId);
-+                return elements
-+              }, {
-+                parsed: parsedEdits,
-+                callId: progress.metadata.id
-+              });
-+
-+              const shadowElementsAmount = await shadowElements.getProperty("length");
-+              queryingElements.push([shadowElements, shadowElementsAmount, shadowRoot]);
-+            }
-+          }
-+
-+          // Document Root Elements (not in CSR)
-+          const rootElements = await scope.evaluateHandleInUtility(([injected, node, { parsed, callId }]) => {
-+            const elements = injected.querySelectorAll(parsed, node);
-+            if (callId) injected.markTargetElements(new Set(elements), callId);
-+            return elements
-+          }, {
-+            parsed: parsedEdits,
-+            callId: progress.metadata.id
-+          });
-+          const rootElementsAmount = await rootElements.getProperty("length");
-+          queryingElements.push([rootElements, rootElementsAmount, resolved.injected]);
-+
-+          // Querying and Sorting the elements by their backendNodeId
-+          for (var queryedElement of queryingElements) {
-+            var elementsToCheck = queryedElement[0];
-+            var elementsAmount = await queryedElement[1].jsonValue();
-+            var parentNode = queryedElement[2];
-+            for (var i = 0; i < elementsAmount; i++) {
-+              if (parentNode.constructor.name == "ElementHandle") {
-+                var elementToCheck = await parentNode.evaluateHandleInUtility(([injected, node, { index, elementsToCheck }]) => { return elementsToCheck[index]; }, { index: i, elementsToCheck: elementsToCheck });
-+              } else {
-+                var elementToCheck = await parentNode.evaluateHandle((injected, { index, elementsToCheck }) => { return elementsToCheck[index]; }, { index: i, elementsToCheck: elementsToCheck });
-+              }
-+              // For other Functions/Utilities
-+              elementToCheck.parentNode = parentNode;
-+              var resolvedElement = await client.send('DOM.describeNode', {
-+                objectId: elementToCheck._objectId,
-+                depth: -1,
-+              });
-+              // Note: Possible Bug, Maybe well actually have to check the Documents Node Position instead of using the backendNodeId
-+              elementToCheck.backendNodeId = resolvedElement.node.backendNodeId;
-+              elements.push(elementToCheck);
-+            }
-+          }
-+        }
-+      }
-+      // Setting currentScopingElements to the elements we just queried
-+      currentScopingElements = [];
-+      for (var element of elements) {
-+        var elemIndex = element.backendNodeId;
-+        // Sorting the Elements by their occourance in the DOM
-+        var elemPos = elementsIndexes.findIndex(index => index > elemIndex);
-+
-+        // Sort the elements by their backendNodeId
-+        if (elemPos === -1) {
-+          currentScopingElements.push(element);
-+          elementsIndexes.push(elemIndex);
-+        } else {
-+          currentScopingElements.splice(elemPos, 0, element);
-+          elementsIndexes.splice(elemPos, 0, elemIndex);
-+        }
-+      }
-+    }
-+    return currentScopingElements;
-+  }
- }
- 
- class SignalBarrier {
-diff -ruN playwright/node_modules/playwright-core/src/server/javascript.ts patchright/node_modules/playwright-core/src/server/javascript.ts
---- playwright/node_modules/playwright-core/src/server/javascript.ts	2025-04-04 17:57:52.536067102 +0000
-+++ patchright/node_modules/playwright-core/src/server/javascript.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -154,17 +154,33 @@
-     return evaluate(this._context, false /* returnByValue */, pageFunction, this, arg);
-   }
- 
--  async evaluateExpression(expression: string, options: { isFunction?: boolean }, arg: any) {
--    const value = await evaluateExpression(this._context, expression, { ...options, returnByValue: true }, this, arg);
--    await this._context.doSlowMo();
--    return value;
--  }
-+  async evaluateExpression(expression: string, options: { isFunction?: boolean }, arg: any, isolatedContext?: boolean) {
-+    let context = this._context;
-+      if (context.constructor.name === "FrameExecutionContext") {
-+          const frame = context.frame;
-+          if (frame) {
-+              if (isolatedContext) context = await frame._utilityContext();
-+              else if (!isolatedContext) context = await frame._mainContext();
-+          }
-+      }
-+      const value = await evaluateExpression(context, expression, { ...options, returnByValue: true }, this, arg);
-+      await context.doSlowMo();
-+      return value;
-+    }
- 
--  async evaluateExpressionHandle(expression: string, options: { isFunction?: boolean }, arg: any): Promise<JSHandle<any>> {
--    const value = await evaluateExpression(this._context, expression, { ...options, returnByValue: false }, this, arg);
--    await this._context.doSlowMo();
--    return value;
--  }
-+  async evaluateExpressionHandle(expression: string, options: { isFunction?: boolean }, arg: any, isolatedContext?: boolean): Promise<JSHandle<any>> {
-+    let context = this._context;
-+      if (this._context.constructor.name === "FrameExecutionContext") {
-+          const frame = this._context.frame;
-+          if (frame) {
-+              if (isolatedContext) context = await frame._utilityContext();
-+              else if (!isolatedContext) context = await frame._mainContext();
-+          }
-+      }
-+      const value = await evaluateExpression(context, expression, { ...options, returnByValue: false }, this, arg);
-+      await context.doSlowMo();
-+      return value;
-+    }
- 
-   async getProperty(propertyName: string): Promise<JSHandle> {
-     const objectHandle = await this.evaluateHandle((object: any, propertyName) => {
-diff -ruN playwright/node_modules/playwright-core/src/server/page.ts patchright/node_modules/playwright-core/src/server/page.ts
---- playwright/node_modules/playwright-core/src/server/page.ts	2025-04-04 17:57:52.537067108 +0000
-+++ patchright/node_modules/playwright-core/src/server/page.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -61,7 +61,7 @@
-   goForward(): Promise<boolean>;
-   requestGC(): Promise<void>;
-   addInitScript(initScript: InitScript): Promise<void>;
--  removeNonInternalInitScripts(): Promise<void>;
-+  removeInitScripts(): Promise<void>;
-   closePage(runBeforeUnload: boolean): Promise<void>;
- 
-   navigateFrame(frame: frames.Frame, url: string, referrer: string | undefined): Promise<frames.GotoResult>;
-@@ -352,15 +352,15 @@
-       throw new Error(`Function "${name}" has been already registered in the browser context`);
-     const binding = new PageBinding(name, playwrightBinding, needsHandle);
-     this._pageBindings.set(name, binding);
--    await this._delegate.addInitScript(binding.initScript);
--    await Promise.all(this.frames().map(frame => frame.evaluateExpression(binding.initScript.source).catch(e => {})));
-+    await this._delegate.exposeBinding(binding);
-   }
- 
-   async _removeExposedBindings() {
--    for (const [key, binding] of this._pageBindings) {
--      if (!binding.internal)
-+    for (const key of this._pageBindings.keys()) {
-+      if (!key.startsWith('__pw'))
-         this._pageBindings.delete(key);
-     }
-+    await this._delegate.removeExposedBindings();
-   }
- 
-   setExtraHTTPHeaders(headers: types.HeadersArray) {
-@@ -577,8 +577,8 @@
-   }
- 
-   async _removeInitScripts() {
--    this.initScripts = this.initScripts.filter(script => script.internal);
--    await this._delegate.removeNonInternalInitScripts();
-+    this.initScripts.splice(0, this.initScripts.length);
-+    await this._delegate.removeInitScripts();
-   }
- 
-   needsRequestInterception(): boolean {
-@@ -770,11 +770,6 @@
-       this._browserContext.addVisitedOrigin(origin);
-   }
- 
--  allInitScripts() {
--    const bindings = [...this._browserContext._pageBindings.values(), ...this._pageBindings.values()];
--    return [kBuiltinsScript, ...bindings.map(binding => binding.initScript), ...this._browserContext.initScripts, ...this.initScripts];
--  }
--
-   getBinding(name: string) {
-     return this._pageBindings.get(name) || this._browserContext._pageBindings.get(name);
-   }
-@@ -811,6 +806,10 @@
-   markAsServerSideOnly() {
-     this._isServerSideOnly = true;
-   }
-+
-+  allBindings() {
-+    return [...this._browserContext._pageBindings.values(), ...this._pageBindings.values()];
-+  }
- }
- 
- export class Worker extends SdkObject {
-@@ -848,30 +847,42 @@
-     this.openScope.close(new Error('Worker closed'));
-   }
- 
--  async evaluateExpression(expression: string, isFunction: boolean | undefined, arg: any): Promise<any> {
--    return js.evaluateExpression(await this._executionContextPromise, expression, { returnByValue: true, isFunction }, arg);
--  }
-+  async evaluateExpression(expression: string, isFunction: boolean | undefined, arg: any, isolatedContext?: boolean): Promise<any> {
-+    let context = await this._executionContextPromise;
-+      if (context.constructor.name === "FrameExecutionContext") {
-+          const frame = context.frame;
-+          if (frame) {
-+              if (isolatedContext) context = await frame._utilityContext();
-+              else if (!isolatedContext) context = await frame._mainContext();
-+          }
-+      }
-+      return js.evaluateExpression(context, expression, { returnByValue: true, isFunction }, arg);
-+    }
- 
--  async evaluateExpressionHandle(expression: string, isFunction: boolean | undefined, arg: any): Promise<any> {
--    return js.evaluateExpression(await this._executionContextPromise, expression, { returnByValue: false, isFunction }, arg);
--  }
-+  async evaluateExpressionHandle(expression: string, isFunction: boolean | undefined, arg: any, isolatedContext?: boolean): Promise<any> {
-+    let context = await this._executionContextPromise;
-+      if (this._context.constructor.name === "FrameExecutionContext") {
-+          const frame = this._context.frame;
-+          if (frame) {
-+              if (isolatedContext) context = await frame._utilityContext();
-+              else if (!isolatedContext) context = await frame._mainContext();
-+          }
-+      }
-+      return js.evaluateExpression(context, expression, { returnByValue: false, isFunction }, arg);
-+    }
- }
- 
- export class PageBinding {
--  static kPlaywrightBinding = '__playwright__binding__';
--
-   readonly name: string;
-   readonly playwrightFunction: frames.FunctionWithSource;
--  readonly initScript: InitScript;
-   readonly needsHandle: boolean;
-   readonly internal: boolean;
- 
-   constructor(name: string, playwrightFunction: frames.FunctionWithSource, needsHandle: boolean) {
-     this.name = name;
-     this.playwrightFunction = playwrightFunction;
--    this.initScript = new InitScript(createPageBindingScript(PageBinding.kPlaywrightBinding, name, needsHandle), true /* internal */);
-+    this.source = `(${addPageBinding.toString()})(${JSON.stringify(name)}, ${needsHandle}, (${source})())`;
-     this.needsHandle = needsHandle;
--    this.internal = name.startsWith('__pw');
-   }
- 
-   static async dispatch(page: Page, payload: string, context: dom.FrameExecutionContext) {
-@@ -896,6 +907,8 @@
-       context.evaluate(deliverBindingResult, { name, seq, error }).catch(e => debugLogger.log('error', e));
-     }
-   }
-+
-+  readonly source: string;
- }
- 
- export class InitScript {
-@@ -905,14 +918,7 @@
- 
-   constructor(source: string, internal?: boolean, name?: string) {
-     const guid = createGuid();
--    this.source = `(() => {
--      globalThis.__pwInitScripts = globalThis.__pwInitScripts || {};
--      const hasInitScript = globalThis.__pwInitScripts[${JSON.stringify(guid)}];
--      if (hasInitScript)
--        return;
--      globalThis.__pwInitScripts[${JSON.stringify(guid)}] = true;
--      ${source}
--    })();`;
-+    this.source = `(() => { ${source} })();`;
-     this.internal = !!internal;
-     this.name = name;
-   }
-diff -ruN playwright/node_modules/playwright-core/src/server/pageBinding.ts patchright/node_modules/playwright-core/src/server/pageBinding.ts
---- playwright/node_modules/playwright-core/src/server/pageBinding.ts	2025-04-04 17:57:52.537067108 +0000
-+++ patchright/node_modules/playwright-core/src/server/pageBinding.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -26,10 +26,11 @@
-   serializedArgs?: SerializedValue[],
- };
- 
--function addPageBinding(playwrightBinding: string, bindingName: string, needsHandle: boolean, utilityScriptSerializersFactory: typeof source, builtins: Builtins) {
-+function addPageBinding(bindingName: string, needsHandle: boolean, utilityScriptSerializersFactory: typeof source, builtins: Builtins) {
-   const { serializeAsCallArgument } = utilityScriptSerializersFactory(builtins);
-   // eslint-disable-next-line no-restricted-globals
--  const binding = (globalThis as any)[playwrightBinding];
-+  const binding = (globalThis as any)[bindingName];
-+  if (binding && binding.toString().startsWith("(...args) => {")) return
-   // eslint-disable-next-line no-restricted-globals
-   (globalThis as any)[bindingName] = (...args: any[]) => {
-   // eslint-disable-next-line no-restricted-globals
-@@ -66,7 +67,6 @@
-     return promise;
-   };
-   // eslint-disable-next-line no-restricted-globals
--  (globalThis as any)[bindingName].__installed = true;
- }
- 
- export function takeBindingHandle(arg: { name: string, seq: number }) {
-diff -ruN playwright/node_modules/playwright-core/src/server/webkit/wkPage.ts patchright/node_modules/playwright-core/src/server/webkit/wkPage.ts
---- playwright/node_modules/playwright-core/src/server/webkit/wkPage.ts	2025-04-04 17:57:52.540067127 +0000
-+++ patchright/node_modules/playwright-core/src/server/webkit/wkPage.ts	2025-04-04 17:57:59.084107486 +0000
-@@ -768,7 +768,7 @@
-     await this._updateBootstrapScript();
-   }
- 
--  async removeNonInternalInitScripts() {
-+  async removeInitScripts() {
-     await this._updateBootstrapScript();
-   }
- 
-diff -ruN playwright/packages/injected/src/xpathSelectorEngine.ts patchright/packages/injected/src/xpathSelectorEngine.ts
---- playwright/packages/injected/src/xpathSelectorEngine.ts	2025-04-04 17:57:52.524067028 +0000
-+++ patchright/packages/injected/src/xpathSelectorEngine.ts	2025-04-04 17:57:59.080107462 +0000
-@@ -18,6 +18,48 @@
- 
- export const XPathEngine: SelectorEngine = {
-   queryAll(root: SelectorRoot, selector: string): Element[] {
-+    if (root.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-+      console.log('Got CSR:', root);
-+      const result: Element[] = [];
-+      // Custom ClosedShadowRoot XPath Engine
-+      const parser = new DOMParser();
-+      // Function to (recursively) get all elements in the shadowRoot
-+      function getAllChildElements(node) {
-+        const elements = [];
-+        const traverse = (currentNode) => {
-+          if (currentNode.nodeType === Node.ELEMENT_NODE) elements.push(currentNode);
-+          currentNode.childNodes?.forEach(traverse);
-+        };
-+        if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE || node.nodeType === Node.ELEMENT_NODE) {
-+          traverse(node);
-+        }
-+
-+        return elements;
-+      }
-+
-+      // Setting innerHTMl and childElements (all, recursive) to avoid race conditions
-+      const csrHTMLContent = root.innerHTML;
-+      const csrChildElements = getAllChildElements(root);
-+      const htmlDoc = parser.parseFromString(csrHTMLContent, 'text/html');
-+      const rootDiv = htmlDoc.body
-+      const rootDivChildElements = getAllChildElements(rootDiv);
-+      // Use the namespace prefix in the XPath expression
-+      const it = htmlDoc.evaluate(selector, htmlDoc, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE);
-+      for (let node = it.iterateNext(); node; node = it.iterateNext()) {
-+        // -1 for the body element
-+        const nodeIndex = rootDivChildElements.indexOf(node) - 1;
-+        if (nodeIndex >= 0) {
-+          const originalNode = csrChildElements[nodeIndex];
-+          if (originalNode.nodeType === Node.ELEMENT_NODE)
-+            result.push(originalNode as Element);
-+        }
-+
-+      }
-+
-+      return result;
-+    }
-+
-+    
-     if (selector.startsWith('/') && root.nodeType !== Node.DOCUMENT_NODE)
-       selector = '.' + selector;
-     const result: Element[] = [];
++    ],
+     "@babel/plugin-transform-export-namespace-from",
+     "@babel/plugin-transform-class-properties",
+     "@babel/plugin-transform-logical-assignment-operators",
+     "@babel/plugin-transform-nullish-coalescing-operator",
+-    "@babel/plugin-transform-optional-chaining",
+     "@babel/plugin-transform-modules-commonjs"
+   ],
+   "ignore": [
+     "**/*.d.ts"
+   ]
+-}
++}
+\ No newline at end of file
 diff -ruN playwright/packages/playwright-core/src/server/bidi/bidiPage.ts patchright/packages/playwright-core/src/server/bidi/bidiPage.ts
---- playwright/packages/playwright-core/src/server/bidi/bidiPage.ts	2025-04-04 17:57:52.532067077 +0000
-+++ patchright/packages/playwright-core/src/server/bidi/bidiPage.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -376,7 +376,7 @@
+--- playwright/packages/playwright-core/src/server/bidi/bidiPage.ts	2025-06-14 21:50:46.338103300 +0200
++++ patchright/packages/playwright-core/src/server/bidi/bidiPage.ts	2025-06-14 21:53:22.274914300 +0200
+@@ -377,7 +377,7 @@
        this._initScriptIds.push(script);
    }
  
@@ -1734,9 +40,9 @@ diff -ruN playwright/packages/playwright-core/src/server/bidi/bidiPage.ts patchr
      this._initScriptIds = [];
      await Promise.all(promises);
 diff -ruN playwright/packages/playwright-core/src/server/browserContext.ts patchright/packages/playwright-core/src/server/browserContext.ts
---- playwright/packages/playwright-core/src/server/browserContext.ts	2025-04-04 17:57:52.532067077 +0000
-+++ patchright/packages/playwright-core/src/server/browserContext.ts	2025-04-04 17:57:59.080107462 +0000
-@@ -150,7 +150,7 @@
+--- playwright/packages/playwright-core/src/server/browserContext.ts	2025-06-14 21:50:46.339602900 +0200
++++ patchright/packages/playwright-core/src/server/browserContext.ts	2025-06-14 21:53:22.269912300 +0200
+@@ -149,7 +149,7 @@
      if (debugMode() === 'console')
        await this.extendInjectedScript(consoleApiSource.source);
      if (this._options.serviceWorkers === 'block')
@@ -1745,7 +51,7 @@ diff -ruN playwright/packages/playwright-core/src/server/browserContext.ts patch
  
      if (this._options.permissions)
        await this.grantPermissions(this._options.permissions);
-@@ -333,16 +333,15 @@
+@@ -332,16 +332,15 @@
      }
      const binding = new PageBinding(name, playwrightBinding, needsHandle);
      this._pageBindings.set(name, binding);
@@ -1766,7 +72,7 @@ diff -ruN playwright/packages/playwright-core/src/server/browserContext.ts patch
    }
  
    async grantPermissions(permissions: string[], origin?: string) {
-@@ -431,8 +430,8 @@
+@@ -430,8 +429,8 @@
    }
  
    async _removeInitScripts(): Promise<void> {
@@ -1778,8 +84,8 @@ diff -ruN playwright/packages/playwright-core/src/server/browserContext.ts patch
  
    async setRequestInterceptor(handler: network.RouteHandler | undefined): Promise<void> {
 diff -ruN playwright/packages/playwright-core/src/server/chromium/chromiumSwitches.ts patchright/packages/playwright-core/src/server/chromium/chromiumSwitches.ts
---- playwright/packages/playwright-core/src/server/chromium/chromiumSwitches.ts	2025-04-04 17:57:52.532067077 +0000
-+++ patchright/packages/playwright-core/src/server/chromium/chromiumSwitches.ts	2025-04-04 17:57:59.081107468 +0000
+--- playwright/packages/playwright-core/src/server/chromium/chromiumSwitches.ts	2025-06-14 21:50:46.179602500 +0200
++++ patchright/packages/playwright-core/src/server/chromium/chromiumSwitches.ts	2025-06-14 21:53:22.275911900 +0200
 @@ -58,27 +58,16 @@
    '--disable-field-trial-config', // https://source.chromium.org/chromium/chromium/src/+/main:testing/variations/README.md
    '--disable-background-networking',
@@ -1819,9 +125,9 @@ diff -ruN playwright/packages/playwright-core/src/server/chromium/chromiumSwitch
 +  '--disable-blink-features=AutomationControlled'
  ];
 diff -ruN playwright/packages/playwright-core/src/server/chromium/crBrowser.ts patchright/packages/playwright-core/src/server/chromium/crBrowser.ts
---- playwright/packages/playwright-core/src/server/chromium/crBrowser.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/packages/playwright-core/src/server/chromium/crBrowser.ts	2025-04-04 17:57:59.082107474 +0000
-@@ -474,11 +474,6 @@
+--- playwright/packages/playwright-core/src/server/chromium/crBrowser.ts	2025-06-14 21:50:46.182102200 +0200
++++ patchright/packages/playwright-core/src/server/chromium/crBrowser.ts	2025-06-14 21:53:22.276414100 +0200
+@@ -494,11 +494,6 @@
        await (page._delegate as CRPage).addInitScript(initScript);
    }
  
@@ -1833,7 +139,7 @@ diff -ruN playwright/packages/playwright-core/src/server/chromium/crBrowser.ts p
    async doUpdateRequestInterception(): Promise<void> {
      for (const page of this.pages())
        await (page._delegate as CRPage).updateRequestInterception();
-@@ -578,4 +573,16 @@
+@@ -598,4 +593,16 @@
      const rootSession = await this._browser._clientRootSession();
      return rootSession.attachToTarget(targetId);
    }
@@ -1851,8 +157,8 @@ diff -ruN playwright/packages/playwright-core/src/server/chromium/crBrowser.ts p
 +  }
  }
 diff -ruN playwright/packages/playwright-core/src/server/chromium/crDevTools.ts patchright/packages/playwright-core/src/server/chromium/crDevTools.ts
---- playwright/packages/playwright-core/src/server/chromium/crDevTools.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/packages/playwright-core/src/server/chromium/crDevTools.ts	2025-04-04 17:57:59.082107474 +0000
+--- playwright/packages/playwright-core/src/server/chromium/crDevTools.ts	2025-06-14 21:50:46.180102700 +0200
++++ patchright/packages/playwright-core/src/server/chromium/crDevTools.ts	2025-06-14 21:53:22.277414300 +0200
 @@ -67,7 +67,6 @@
        }).catch(e => null);
      });
@@ -1862,8 +168,8 @@ diff -ruN playwright/packages/playwright-core/src/server/chromium/crDevTools.ts 
        session.send('Page.enable'),
        session.send('Page.addScriptToEvaluateOnNewDocument', { source: `
 diff -ruN playwright/packages/playwright-core/src/server/chromium/crNetworkManager.ts patchright/packages/playwright-core/src/server/chromium/crNetworkManager.ts
---- playwright/packages/playwright-core/src/server/chromium/crNetworkManager.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/packages/playwright-core/src/server/chromium/crNetworkManager.ts	2025-04-04 17:57:59.082107474 +0000
+--- playwright/packages/playwright-core/src/server/chromium/crNetworkManager.ts	2025-06-14 21:50:46.180605200 +0200
++++ patchright/packages/playwright-core/src/server/chromium/crNetworkManager.ts	2025-06-14 21:53:22.278413700 +0200
 @@ -1,3 +1,5 @@
 +// undetected-undetected_playwright-patch - custom imports
 +import crypto from 'crypto';
@@ -2039,8 +345,8 @@ diff -ruN playwright/packages/playwright-core/src/server/chromium/crNetworkManag
  
  // In certain cases, protocol will return error if the request was already canceled
 diff -ruN playwright/packages/playwright-core/src/server/chromium/crPage.ts patchright/packages/playwright-core/src/server/chromium/crPage.ts
---- playwright/packages/playwright-core/src/server/chromium/crPage.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/packages/playwright-core/src/server/chromium/crPage.ts	2025-04-04 17:57:59.082107474 +0000
+--- playwright/packages/playwright-core/src/server/chromium/crPage.ts	2025-06-14 21:50:46.181604700 +0200
++++ patchright/packages/playwright-core/src/server/chromium/crPage.ts	2025-06-14 21:53:22.278914300 +0200
 @@ -1,3 +1,5 @@
 +// undetected-undetected_playwright-patch - custom imports
 +import crypto from 'crypto';
@@ -2345,8 +651,8 @@ diff -ruN playwright/packages/playwright-core/src/server/chromium/crPage.ts patc
  
  async function emulateLocale(session: CRSession, locale: string) {
 diff -ruN playwright/packages/playwright-core/src/server/chromium/crServiceWorker.ts patchright/packages/playwright-core/src/server/chromium/crServiceWorker.ts
---- playwright/packages/playwright-core/src/server/chromium/crServiceWorker.ts	2025-04-04 17:57:52.533067083 +0000
-+++ patchright/packages/playwright-core/src/server/chromium/crServiceWorker.ts	2025-04-04 17:57:59.083107480 +0000
+--- playwright/packages/playwright-core/src/server/chromium/crServiceWorker.ts	2025-06-14 21:50:46.182604700 +0200
++++ patchright/packages/playwright-core/src/server/chromium/crServiceWorker.ts	2025-06-14 21:53:22.279912600 +0200
 @@ -44,8 +44,6 @@
        this.updateOffline();
        this._networkManager.addSession(session, undefined, true /* isMain */).catch(() => {});
@@ -2357,8 +663,8 @@ diff -ruN playwright/packages/playwright-core/src/server/chromium/crServiceWorke
      session.on('Inspector.targetReloadedAfterCrash', () => {
        // Resume service worker after restart.
 diff -ruN playwright/packages/playwright-core/src/server/clock.ts patchright/packages/playwright-core/src/server/clock.ts
---- playwright/packages/playwright-core/src/server/clock.ts	2025-04-04 17:57:52.534067090 +0000
-+++ patchright/packages/playwright-core/src/server/clock.ts	2025-04-04 17:57:59.080107462 +0000
+--- playwright/packages/playwright-core/src/server/clock.ts	2025-06-14 21:50:46.340602400 +0200
++++ patchright/packages/playwright-core/src/server/clock.ts	2025-06-14 21:53:22.270913100 +0200
 @@ -92,6 +92,14 @@
    }
  
@@ -2375,8 +681,8 @@ diff -ruN playwright/packages/playwright-core/src/server/clock.ts patchright/pac
    }
  }
 diff -ruN playwright/packages/playwright-core/src/server/dispatchers/frameDispatcher.ts patchright/packages/playwright-core/src/server/dispatchers/frameDispatcher.ts
---- playwright/packages/playwright-core/src/server/dispatchers/frameDispatcher.ts	2025-04-04 17:57:52.535067096 +0000
-+++ patchright/packages/playwright-core/src/server/dispatchers/frameDispatcher.ts	2025-04-04 17:57:59.083107480 +0000
+--- playwright/packages/playwright-core/src/server/dispatchers/frameDispatcher.ts	2025-06-14 21:50:45.851241500 +0200
++++ patchright/packages/playwright-core/src/server/dispatchers/frameDispatcher.ts	2025-06-14 21:53:22.280413900 +0200
 @@ -84,11 +84,15 @@
    }
  
@@ -2396,8 +702,8 @@ diff -ruN playwright/packages/playwright-core/src/server/dispatchers/frameDispat
  
    async waitForSelector(params: channels.FrameWaitForSelectorParams, metadata: CallMetadata): Promise<channels.FrameWaitForSelectorResult> {
 diff -ruN playwright/packages/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts patchright/packages/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts
---- playwright/packages/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts	2025-04-04 17:57:52.535067096 +0000
-+++ patchright/packages/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts	2025-04-04 17:57:59.083107480 +0000
+--- playwright/packages/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts	2025-06-14 21:50:45.852241200 +0200
++++ patchright/packages/playwright-core/src/server/dispatchers/jsHandleDispatcher.ts	2025-06-14 21:53:22.281413800 +0200
 @@ -39,11 +39,11 @@
    }
  
@@ -2413,8 +719,8 @@ diff -ruN playwright/packages/playwright-core/src/server/dispatchers/jsHandleDis
    }
  
 diff -ruN playwright/packages/playwright-core/src/server/dispatchers/pageDispatcher.ts patchright/packages/playwright-core/src/server/dispatchers/pageDispatcher.ts
---- playwright/packages/playwright-core/src/server/dispatchers/pageDispatcher.ts	2025-04-04 17:57:52.535067096 +0000
-+++ patchright/packages/playwright-core/src/server/dispatchers/pageDispatcher.ts	2025-04-04 17:57:59.083107480 +0000
+--- playwright/packages/playwright-core/src/server/dispatchers/pageDispatcher.ts	2025-06-14 21:50:45.850741300 +0200
++++ patchright/packages/playwright-core/src/server/dispatchers/pageDispatcher.ts	2025-06-14 21:53:22.281914700 +0200
 @@ -353,11 +353,11 @@
    }
  
@@ -2430,8 +736,8 @@ diff -ruN playwright/packages/playwright-core/src/server/dispatchers/pageDispatc
  }
  
 diff -ruN playwright/packages/playwright-core/src/server/firefox/ffPage.ts patchright/packages/playwright-core/src/server/firefox/ffPage.ts
---- playwright/packages/playwright-core/src/server/firefox/ffPage.ts	2025-04-04 17:57:52.536067102 +0000
-+++ patchright/packages/playwright-core/src/server/firefox/ffPage.ts	2025-04-04 17:57:59.084107486 +0000
+--- playwright/packages/playwright-core/src/server/firefox/ffPage.ts	2025-06-14 21:50:46.204604700 +0200
++++ patchright/packages/playwright-core/src/server/firefox/ffPage.ts	2025-06-14 21:53:22.282414000 +0200
 @@ -390,7 +390,7 @@
      await this._session.send('Page.setInitScripts', { scripts: this._initScripts.map(s => ({ script: s.initScript.source, worldName: s.worldName })) });
    }
@@ -2441,9 +747,170 @@ diff -ruN playwright/packages/playwright-core/src/server/firefox/ffPage.ts patch
      this._initScripts = this._initScripts.filter(s => s.initScript.internal);
      await this._session.send('Page.setInitScripts', { scripts: this._initScripts.map(s => ({ script: s.initScript.source, worldName: s.worldName })) });
    }
+diff -ruN playwright/packages/playwright-core/src/server/frameSelectors.ts patchright/packages/playwright-core/src/server/frameSelectors.ts
+--- playwright/packages/playwright-core/src/server/frameSelectors.ts	2025-06-14 21:50:46.341102400 +0200
++++ patchright/packages/playwright-core/src/server/frameSelectors.ts	2025-06-14 21:53:22.272412800 +0200
+@@ -23,7 +23,7 @@
+ import type { JSHandle } from './javascript';
+ import type * as types from './types';
+ import type { ParsedSelector } from '../utils/isomorphic/selectorParser';
+-
++import { NonRecoverableDOMError } from "./dom";
+ 
+ export type SelectorInfo = {
+   parsed: ParsedSelector,
+@@ -66,13 +66,87 @@
+   }
+ 
+   async queryArrayInMainWorld(selector: string, scope?: ElementHandle): Promise<JSHandle<Element[]>> {
+-    const resolved = await this.resolveInjectedForSelector(selector, { mainWorld: true }, scope);
++
++    // _debugLogger.debugLogger.log('api',`PVM14 queryArrayInMainWorld: selector=[${selector}] scope=[${scope}]...`);
++    const resolved = await this.resolveInjectedForSelector(selector, {
++      mainWorld: true
++    }, scope);
+     // Be careful, |this.frame| can be different from |resolved.frame|.
+-    if (!resolved)
+-      throw new Error(`Failed to find frame for selector "${selector}"`);
+-    return await resolved.injected.evaluateHandle((injected, { info, scope }) => {
+-      return injected.querySelectorAll(info.parsed, scope || document);
+-    }, { info: resolved.info, scope: resolved.scope });
++    if (!resolved) throw new Error(`Failed to find frame for selector "${selector}"`);
++    // _debugLogger.debugLogger.log('api',
++    //   `PVM14 queryArrayInMainWorld: resolved.info=[${JSON.stringify(resolved.info)}] resolved.scope=[${
++    //     resolved.scope}] resolved.frame !== this.frame [${resolved.frame !== this.frame}] ...`);
++
++    /* All this code below is needed because certain execution paths (e.g., 'all_inner_texts()' or 'element_handles()' invocations)
++        get here and, in the case of existing closed shadow roots, just by inspecting what is in the 'resolved.frame'
++        they wouldn't get all the elements. The real question is: WHY DIDN'T I HAVE TO IMPLEMENT THIS IN OTHER POINTS
++        OF THIS FILE AS 'query', 'queryCount' OR 'queryAll' ?
++        I think the response is that these functions aren't used anymore, but I'm not sure... */
++
++    // Get JSHandles to all closed shadow roots first. These handles will be passed to the browser-side function.
++    const closedShadowRootHandles = await resolved.frame.getClosedShadowRoots();
++    // _debugLogger.debugLogger.log('api', `PVM14 queryArrayInMainWorld: Found ${closedShadowRootHandles.length} closed shadow roots.`);
++
++    /* This function runs in the browser.
++        argInitialScope is a DOM element (or document/null).
++        argShadowRootDOMElements is an array of ShadowRoot DOM elements. */
++    const pageFunction = (injected, { argInfo, argInitialScope, argShadowRootDOMElements }) => {
++      const allFoundDOMElements = [];
++      const parsedSelector = argInfo.parsed;
++
++      /* 1. Query in the main document (or initial scope)
++          'injected.querySelectorAll' returns a NodeList or similar array-like structure of DOM elements. */
++      const mainDocNodeList = injected.querySelectorAll(parsedSelector, argInitialScope || document);
++      for (let i = 0; i < mainDocNodeList.length; i++) {
++        allFoundDOMElements.push(mainDocNodeList[i]);
++      }
++      // console.log(`PVM14 BROWSER: Found ${mainDocNodeList.length} elements in main/initial scope for selector:`, parsedSelector);
++
++      /* TODO: PVM14 Ugly as hell. Tailor-made "if" designed to make locator "> *" work.
++          The idea is—to avoid duplicates—not to check shadow roots if we are looking for "scope > *"
++          unless we are dealing with the host of the shadowRoot (in that case, the direct children of the host
++          are the shadowRoots and they must be inspected). */
++      var firstSimple = parsedSelector?.parts?.[0]?.body?.[0]?.simples?.[0];
++      var lookingForDirectChildElementsOfCurrentElement = firstSimple?.selector?.functions?.[0]?.name === "scope" && firstSimple?.combinator === ">";
++
++      /* 2. Query in each closed shadow root
++          argShadowRootDOMElements is an array of actual ShadowRoot DOM elements here. */
++      for (const shadowRoot of argShadowRootDOMElements) {
++        const isScopeTheHost = argInitialScope === shadowRoot.host;
++        if (lookingForDirectChildElementsOfCurrentElement && !isScopeTheHost) { } else {
++          const shadowNodeList = injected.querySelectorAll(parsedSelector, shadowRoot);
++          for (let i = 0; i < shadowNodeList.length; i++) {
++            allFoundDOMElements.push(shadowNodeList[i]);
++          }
++        }
++        // console.log(`PVM14 BROWSER: Found ${shadowNodeList.length} elements in a shadow root for selector:`, parsedSelector);
++      }
++      // console.log(`PVM14 BROWSER: Total elements found: ${allFoundDOMElements.length}`);
++      return allFoundDOMElements; // This will be an array of DOM elements
++    };
++
++    /* Execute the pageFunction in the browser.
++        - resolved.injected is the InjectedScript instance for the correct context.
++        - The second argument to evaluateHandle is an object containing arguments for pageFunction.
++          JSHandles (like resolved.scope and elements of closedShadowRootHandles) passed here
++          will be resolved to their corresponding DOM elements/values within pageFunction. */
++    const finalArrayHandle = await resolved.injected.evaluateHandle(
++      pageFunction,
++      { // Argument for pageFunction
++        argInfo: resolved.info,
++        argInitialScope: resolved.scope, // JSHandle, resolves to DOM element/null in pageFunction
++        argShadowRootDOMElements: closedShadowRootHandles // Array of JSHandles, resolves to array of ShadowRoot DOM elements
++      }
++    );
++
++    /* Dispose the JSHandles for the shadow roots now that they've been used
++        and their corresponding DOM elements have been processed by pageFunction. */
++    for (const handle of closedShadowRootHandles) {
++      await handle.dispose();
++    }
++    // _debugLogger.debugLogger.log('api', `PVM14 queryArrayInMainWorld: Disposed ${closedShadowRootHandles.length} closed shadow root JSHandles.`);
++
++    return finalArrayHandle;
+   }
+ 
+   async queryCount(selector: string): Promise<number> {
+@@ -134,9 +208,9 @@
+           throw injected.createStacklessError(`Selector "${selectorString}" resolved to ${injected.previewNode(element)}, <iframe> was expected`);
+         return element;
+       }, { info, scope: i === 0 ? scope : undefined, selectorString: stringifySelector(info.parsed) });
+-      const element = handle.asElement() as ElementHandle<Element> | null;
+-      if (!element)
+-        return null;
++      let element = handle.asElement() as ElementHandle<Element> | null;
++      if (!element) // My modification: instead of giving up, look for the frame in closed shadowRoot objects
++        element = await this.lookForFrameInClosedShadowRoots(frame, injectedScript, info, stringifySelector(info.parsed))
+       const maybeFrame = await frame._page._delegate.getContentFrame(element);
+       element.dispose();
+       if (!maybeFrame)
+@@ -158,6 +232,41 @@
+     const injected = await context.injectedScript();
+     return { injected, info: resolved.info, frame: resolved.frame, scope: resolved.scope };
+   }
++
++  async lookForFrameInClosedShadowRoots(frame, injectedScript, info, selectorString) {
++    const closedShadowRoots = await frame.getClosedShadowRoots()
++    const elements = []
++    for (const shadowRootHandle of closedShadowRoots) {
++      const handle = await injectedScript.evaluateHandle((remoteInjectedScript, {
++        info,
++        scope,
++        selectorString
++      }) => {
++        const element = remoteInjectedScript.querySelector(info.parsed, scope, info.strict);
++        if (element && element.nodeName !== 'IFRAME' && element.nodeName !== 'FRAME')
++          throw remoteInjectedScript.createStacklessError(`Selector "${selectorString}" resolved to ${remoteInjectedScript.previewNode(element)}, <iframe> was expected`);
++        return element;
++      }, {
++        info,
++        scope: shadowRootHandle,
++        selectorString
++      });
++      const element = handle.asElement();
++      if (element) elements.push(element)
++      // Getting rid of the shadowRootHandle after using it to avoid creating memory leaks ...
++      await shadowRootHandle.dispose();
++    }
++
++    if (elements.length > 1) {
++      // We throw a NonRecoverableDOMError indicating multiple frames found within closed shadow roots.
++      // I'm not sure if this is really an error but I want to see it when it happens and I want it to stop the execution ...
++      const elementsPreview = elements.map(e => e.toString()).join(', ');
++      throw new NonRecoverableDOMError(`Selector "${selectorString}" resolved to ${elements.length} elements in closed shadow roots: [${elementsPreview}]. Expected 1 frame element.`);
++    }
++
++    // Return the single element found, or null if none were found.
++    return elements.length === 1 ? elements[0] : null;
++  }
+ }
+ 
+ async function adoptIfNeeded<T extends Node>(handle: ElementHandle<T>, context: FrameExecutionContext): Promise<ElementHandle<T>> {
 diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/packages/playwright-core/src/server/frames.ts
---- playwright/packages/playwright-core/src/server/frames.ts	2025-04-04 17:57:52.536067102 +0000
-+++ patchright/packages/playwright-core/src/server/frames.ts	2025-04-04 17:57:59.080107462 +0000
+--- playwright/packages/playwright-core/src/server/frames.ts	2025-06-14 21:50:46.342603200 +0200
++++ patchright/packages/playwright-core/src/server/frames.ts	2025-06-14 21:53:22.271911700 +0200
 @@ -1,3 +1,7 @@
 +// undetected-undetected_playwright-patch - custom imports
 +import { CRExecutionContext } from './chromium/crExecutionContext';
@@ -2630,7 +1097,33 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
      return scope ? scope._context._raceAgainstContextDestroyed(promise) : promise;
    }
  
-@@ -886,7 +940,20 @@
+@@ -881,12 +935,45 @@
+     }, { parsed: selectors, color: color });
+   }
+ 
++  /**
++   * Implementing the same logic as in 'queryCount': this function returns 'handles', 'queryCount' returns
++   * 'handles.length'. Before this modification this function invoked FrameSelectors.queryAll which I think
++   * isn't used anymore ...
++   */
+   async querySelectorAll(selector: string): Promise<dom.ElementHandle<Element>[]> {
+-    return this.selectors.queryAll(selector);
++    const custom_metadata = {
++      "internal": false,
++      "log": []
++    };
++    const controller = new ProgressController(custom_metadata, this);
++    return await controller.run(async progress => {
++      const handles = await this._retryWithProgressIfNotConnected(progress, selector, false, false , async result => {
++        if (!result || !result[0]) { // No elements found, or result itself is null from _retry...
++            return [];
++        }
++        return result[1]; // Return currentScopingElements (array of ElementHandles)
++      }, 'returnAll');
++      // If _retryWithProgressIfNotConnected itself returns null (e.g., on timeout before action is run, or if action returns null explicitly),
++      // handles will be null. Otherwise, it's the array from the action (possibly empty).
++      return handles === null ? [] : handles;
++    });
    }
  
    async queryCount(selector: string): Promise<number> {
@@ -2639,7 +1132,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +      "internal": false,
 +      "log": []
 +    };
-+    const controller = new _progress.ProgressController(custom_metadata, this);
++    const controller = new ProgressController(custom_metadata, this);
 +    return await controller.run(async progress => {
 +      progress.log("waiting for " + this._asLocator(selector));
 +      const promise = await this._retryWithProgressIfNotConnected(progress, selector, false, false, async result => {
@@ -2647,12 +1140,12 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +        const handles = result[1];
 +        return handle ? handles.length : 0;
 +      }, 'returnAll');
-+      return promise;
-+    }, 100); // A bit geeky but its okay :D
++      return promise === null ? -1 : promise; // It was returning null and causing an ugly Locator.count: value: expected number, got object
++    }); // <<< REMOVED ', 100' // A bit geeky but its okay :D => IT'S NOT OKAY IF YOU ARE DOING SOMETHING THAT TAKES LONGER
    }
  
    async content(): Promise<string> {
-@@ -908,31 +975,38 @@
+@@ -908,31 +995,38 @@
    }
  
    async setContent(metadata: CallMetadata, html: string, options: types.NavigateOptions = {}): Promise<void> {
@@ -2714,7 +1207,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
  
    name(): string {
      return this._name || '';
-@@ -1125,50 +1199,74 @@
+@@ -1125,50 +1219,74 @@
      selector: string,
      strict: boolean | undefined,
      performActionPreChecks: boolean,
@@ -2735,7 +1228,15 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 -      if (!resolved)
 +      if (!resolved) {
 +        if (returnAction === 'returnOnNotResolved' || returnAction === 'returnAll') return null;
-+        return continuePolling;
+         return continuePolling;
+-      const result = await resolved.injected.evaluateHandle((injected, { info, callId }) => {
+-        const elements = injected.querySelectorAll(info.parsed, document);
+-        if (callId)
+-          injected.markTargetElements(new Set(elements), callId);
+-        const element = elements[0] as Element | undefined;
+-        let log = '';
+-        if (elements.length > 1) {
+-          if (info.strict)
 +      }
 +
 +      try {
@@ -2758,15 +1259,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +      if (currentScopingElements.length == 0) {
 +        // TODO: Dispose?
 +        if (returnAction === 'returnOnNotResolved' || returnAction === 'returnAll') return null;
-         return continuePolling;
--      const result = await resolved.injected.evaluateHandle((injected, { info, callId }) => {
--        const elements = injected.querySelectorAll(info.parsed, document);
--        if (callId)
--          injected.markTargetElements(new Set(elements), callId);
--        const element = elements[0] as Element | undefined;
--        let log = '';
--        if (elements.length > 1) {
--          if (info.strict)
++        return continuePolling;
 +      }
 +      const resultElement = currentScopingElements[0];
 +      if (currentScopingElements.length > 1) {
@@ -2821,7 +1314,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
      });
    }
  
-@@ -1319,17 +1417,34 @@
+@@ -1319,17 +1437,34 @@
  
    async isVisibleInternal(selector: string, options: types.StrictOptions = {}, scope?: dom.ElementHandle): Promise<boolean> {
      try {
@@ -2866,7 +1359,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
        return false;
      }
    }
-@@ -1489,40 +1604,46 @@
+@@ -1489,40 +1624,46 @@
    }
  
    private async _expectInternal(progress: Progress, selector: string, options: FrameExpectParams, lastIntermediateResult: { received?: any, isSet: boolean }) {
@@ -2894,6 +1387,18 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +        }, { handle, options, handles });
 +      }
 +    }, 'returnAll');
++
++    // Default Values, if no Elements found
++    var matches = false;
++    var received = 0;
++    var missingReceived = null;
++    if (promise) {
++      matches = promise.matches;
++      received = promise.received;
++      missingReceived = promise.missingReceived;
++    } else if (options.expectedNumber === 0) {
++      matches = true;
++    }
  
 -    const { log, matches, received, missingReceived } = await injected.evaluate(async (injected, { info, options, callId }) => {
 -      const elements = info ? injected.querySelectorAll(info.parsed, document) : [];
@@ -2913,18 +1418,6 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 -    if (log)
 -      progress.log(log);
 -    // Note: missingReceived avoids `unexpected value "undefined"` when element was not found.
-+    // Default Values, if no Elements found
-+    var matches = false;
-+    var received = 0;
-+    var missingReceived = null;
-+    if (promise) {
-+      matches = promise.matches;
-+      received = promise.received;
-+      missingReceived = promise.missingReceived;
-+    } else if (options.expectedNumber === 0) {
-+      matches = true;
-+    }
-+
 +    // Note: missingReceived avoids unexpected value "undefined" when element was not found.
      if (matches === options.isNot) {
        lastIntermediateResult.received = missingReceived ? '<element(s) not found>' : received;
@@ -2941,7 +1434,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
    }
  
    async _waitForFunctionExpression<R>(metadata: CallMetadata, expression: string, isFunction: boolean | undefined, arg: any, options: types.WaitForFunctionOptions, world: types.World = 'main'): Promise<js.SmartHandle<R>> {
-@@ -1632,28 +1753,27 @@
+@@ -1632,28 +1773,27 @@
      const callbackText = body.toString();
      const controller = new ProgressController(metadata, this);
      return controller.run(async progress => {
@@ -2991,7 +1484,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
        });
        return scope ? scope._context._raceAgainstContextDestroyed(promise) : promise;
      }, this._page._timeoutSettings.timeout(options));
-@@ -1757,6 +1877,170 @@
+@@ -1757,6 +1897,258 @@
    private _asLocator(selector: string) {
      return asLocator(this._page.attribution.playwright.options.sdkLanguage, selector);
    }
@@ -3054,8 +1547,8 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +          const describedScope = await client.send('DOM.describeNode', {
 +            objectId: scope._objectId,
 +            depth: -1,
-+            pierce: true
-+          });
++            pierce: true // This 'true' really pierces through closed shadowRoots but not iframes.
++          });            // It is not capable of overcoming the lack of the flag --disable-site-isolation-trials and that can bring problems ...
 +
 +          // Elements Queryed in the "current round"
 +          var queryingElements = [];
@@ -3081,6 +1574,8 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +
 +            var shadowRootBackendIds = findClosedShadowRoots(describedScope.node);
 +            var shadowRoots = [];
++            // ESSENTIAL: Using 'DOM.resolveNode' you get a reference to the remote closed shadow root object THAT ALLOWS YOU TO OPERATE WITH IT
++            // using 'injected.querySelectorAll' BECAUSE ONCE YOU ARE 'POSITIONED' IN THE CLOSED SHADOW ROOT YOU CAN INSPECT INSIDE IT WITHOUT LIMITATIONS ...
 +            for (var shadowRootBackendId of shadowRootBackendIds) {
 +              var resolvedShadowRoot = await client.send('DOM.resolveNode', {
 +                backendNodeId: shadowRootBackendId,
@@ -3089,18 +1584,37 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +              shadowRoots.push(new dom.ElementHandle(context, resolvedShadowRoot.object.objectId));
 +            }
 +
-+            for (var shadowRoot of shadowRoots) {
-+              const shadowElements = await shadowRoot.evaluateHandleInUtility(([injected, node, { parsed, callId }]) => {
-+                const elements = injected.querySelectorAll(parsed, node);
-+                if (callId) injected.markTargetElements(new Set(elements), callId);
-+                return elements
-+              }, {
-+                parsed: parsedEdits,
-+                callId: progress.metadata.id
-+              });
++            /* TODO: PVM14 Ugly as hell and potentially imperfect specific solution for the "> *" locator.
++                It aims to prevent duplicate counting by focusing only on first-level children.
++                Recursively obtained closed shadowRoots are ignored unless the current
++                scope is the shadowRoot's host, where shadowRoots are the direct children we are looking for. */
++            var firstSimple = parsedEdits?.parts?.[0]?.body?.[0]?.simples?.[0];
++            var lookingForDirectChildElementsOfCurrentElement = firstSimple?.selector?.functions?.[0]?.name === "scope" && firstSimple?.combinator === ">";
 +
-+              const shadowElementsAmount = await shadowElements.getProperty("length");
-+              queryingElements.push([shadowElements, shadowElementsAmount, shadowRoot]);
++            /* NOW COMES THE IMPORTANT PART:
++                => BASIC, THIS IS ABLE TO INTROSPECT closed shadowRoot BECAUSE IT EXECUTES querySelectorAll SPECIFICALLY TARGETING SUCH NODES. */
++            for (var shadowRoot of shadowRoots) {
++              const hostOfShadowRootHandle = await shadowRoot.evaluateHandle(sr => sr.host);
++              const describedHostNode = await client.send('DOM.describeNode', { objectId: hostOfShadowRootHandle._objectId });
++              const hostOfShadowRootBackendNodeId = describedHostNode.node.backendNodeId;
++              const isScopeTheHost = scope.backendNodeId === hostOfShadowRootBackendNodeId;
++              await hostOfShadowRootHandle.dispose();
++
++             if (!lookingForDirectChildElementsOfCurrentElement || isScopeTheHost) {
++                const shadowElements = await shadowRoot.evaluateHandleInUtility(([injected, node, {
++                  parsed,
++                  callId
++                }]) => {
++                  const elements = injected.querySelectorAll(parsed, node);
++                  if (callId) injected.markTargetElements(new Set(elements), callId);
++                  return elements;
++                }, {
++                  parsed: parsedEdits,
++                  callId: progress.metadata.id
++                });
++                const shadowElementsAmount = await shadowElements.getProperty("length");
++                queryingElements.push([shadowElements, shadowElementsAmount, shadowRoot]);
++              }
 +            }
 +          }
 +
@@ -3144,7 +1658,7 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +      currentScopingElements = [];
 +      for (var element of elements) {
 +        var elemIndex = element.backendNodeId;
-+        // Sorting the Elements by their occourance in the DOM
++        // Sorting the Elements by their occurrence in the DOM
 +        var elemPos = elementsIndexes.findIndex(index => index > elemIndex);
 +
 +        // Sort the elements by their backendNodeId
@@ -3159,13 +1673,176 @@ diff -ruN playwright/packages/playwright-core/src/server/frames.ts patchright/pa
 +    }
 +    return currentScopingElements;
 +  }
++
++  async getClosedShadowRoots() {
++
++        // TODO:PVM14 Getting all the closed ShadowRoot recursively. We don't traverse IFRAMEs for the moment ...
++        let context = await this._context("main");
++        // Getting the CDP client ...
++        try {
++          var client = this._page._delegate._sessionForFrame(this)._client;
++        } catch (e) {
++          var client = this._page._delegate._mainFrameSession._client;
++        }
++        // Obtaining the objectId for the document
++        const documentNode = await client.send('Runtime.evaluate', { // https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-evaluate
++          expression: "document",
++          serializationOptions: {
++            serialization: "idOnly"
++          },
++          contextId: context.delegate._contextId
++        });
++        // _debugLogger.debugLogger.log('api', `PVM14 getClosedShadowRoots: documentNode.result.objectId = [${documentNode.result.objectId}]`);
++        // TODO:PVM14 Geting the whole document as deep as IFRAMEs security allows us ...
++        const describedScope = await client.send('DOM.describeNode', {
++          objectId: documentNode.result.objectId,
++          depth: -1,
++          pierce: true
++        });
++        // _debugLogger.debugLogger.log('api',`PVM14 _customFindElementsByParsed: describedScope:\n ${JSON.stringify(describedScope,null,2)}\n`);
++
++        // TODO:PVM14 Probably in the future refactor this repeated code ...
++        function findClosedShadowRoots(node, results = []) {
++          if (!node || typeof node !== 'object') return results;
++
++          // Check for shadow roots in the current node
++          if (node.shadowRoots && Array.isArray(node.shadowRoots)) {
++            for (const shadowRoot of node.shadowRoots) {
++              if (shadowRoot.shadowRootType === 'closed' && shadowRoot.backendNodeId) {
++    //            _debugLogger.debugLogger.log('api', `PVM14 getClosedShadowRoots: closed shadowRoot DETECTED shadowRoot.nodeName = ${
++    //                  shadowRoot.nodeName} shadowRoot.backendNodeId=[${shadowRoot.backendNodeId}] ... `);
++                results.push(shadowRoot.backendNodeId);
++              }
++              findClosedShadowRoots(shadowRoot, results);
++            }
++          }
++
++          if (node.nodeName !== 'IFRAME' && node.children && Array.isArray(node.children)) {
++            for (const child of node.children) {
++              findClosedShadowRoots(child, results);
++            }
++          }
++          return results;
++        }
++
++        var shadowRootBackendIds = findClosedShadowRoots(describedScope.node);
++        // _debugLogger.debugLogger.log('api', `PVM14 getClosedShadowRoots: shadowRootBackendIds.length = [${shadowRootBackendIds.length}] ... `);
++
++        var shadowRoots = [];
++        for (var shadowRootBackendId of shadowRootBackendIds) {
++          var resolvedShadowRoot = await client.send('DOM.resolveNode', { // https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-resolveNode
++            backendNodeId: shadowRootBackendId,
++            contextId: context.delegate._contextId
++          });
++          shadowRoots.push(new dom.ElementHandle(context, resolvedShadowRoot.object.objectId)); // https://playwright.dev/docs/api/class-elementhandle
++        }
++        // _debugLogger.debugLogger.log('api', `PVM14 getClosedShadowRoots: shadowRoots.length = [${shadowRoots.length}] ... `);
++
++        return shadowRoots;
++  }
  }
  
  class SignalBarrier {
+diff -ruN playwright/packages/playwright-core/src/server/injected/selectorEvaluator.ts patchright/packages/playwright-core/src/server/injected/selectorEvaluator.ts
+--- playwright/packages/playwright-core/src/server/injected/selectorEvaluator.ts	2025-06-14 21:50:46.236102900 +0200
++++ patchright/packages/playwright-core/src/server/injected/selectorEvaluator.ts	2025-06-14 21:53:22.283413700 +0200
+@@ -201,7 +201,12 @@
+ 
+   private _matchesSimple(element: Element, simple: CSSSimpleSelector, context: QueryContext): boolean {
+     return this._cached<boolean>(this._cacheMatchesSimple, element, [simple, context.scope, context.pierceShadow, context.originalScope], () => {
+-      if (element === context.scope)
++      /* TODO: PVM14 There was and edge case for parsed "> *" window.__injectedScript.querySelectorAll(parsed, document.children[0]); =[].
++        I had to do this:
++        If the element is the context.scope, it cannot match if there are no functions. This prevents a simple selector like html
++        (where simple.css is "html" and simple.functions is empty) from matching when context.scope is <html> during an ancestor check.
++        A match for the scope element itself requires an explicit function like :scope */
++      if (element === context.scope && !simple.functions.length)
+         return false;
+       if (simple.css && !this._matchesCSS(element, simple.css))
+         return false;
+@@ -357,7 +362,14 @@
+             query(element.shadowRoot);
+         }
+       }
+-      query(context.scope);
++      /* TODO: PVM14 There was an edge case (using ">*" locator when the scope is the direct child of a closed shadow root) not working
++          and it was critical for my logic. To make it work I had to do this:
++          This is the most failsafe way I can think of introducing my Fix for taking into account the manoeuvre
++          in 'parentElementOrShadowHost'...  In this case 'scope' is equal to 'host' and we need to resort to 'originalScope' */
++      if (context?.originalScope?.parentNode?.mode == 'closed')
++        query(context.originalScope);
++      else
++        query(context.scope);
+       return result;
+     });
+   }
+@@ -405,6 +417,10 @@
+     const actualScope = context.originalScope || context.scope;
+     if (actualScope.nodeType === 9 /* Node.DOCUMENT_NODE */)
+       return element === (actualScope as Document).documentElement;
++    /* TODO: PVM14 There was an edge case (using ">*" locator when the scope is the closed shadow root) not working and it was
++        critical for my logic. To make it work I had to do this: Taking into account the manoeuvre in 'parentElementOrShadowHost' ... */
++    if (actualScope.nodeType === 11)
++      return element === actualScope.host;
+     return element === actualScope;
+   },
+ 
+diff -ruN playwright/packages/playwright-core/src/server/injected/xpathSelectorEngine.ts patchright/packages/playwright-core/src/server/injected/xpathSelectorEngine.ts
+--- playwright/packages/playwright-core/src/server/injected/xpathSelectorEngine.ts	2025-06-14 21:50:46.236603400 +0200
++++ patchright/packages/playwright-core/src/server/injected/xpathSelectorEngine.ts	2025-06-14 21:53:22.284414700 +0200
+@@ -18,6 +18,48 @@
+ 
+ export const XPathEngine: SelectorEngine = {
+   queryAll(root: SelectorRoot, selector: string): Element[] {
++    if (root.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
++      console.log('Got CSR:', root);
++      const result: Element[] = [];
++      // Custom ClosedShadowRoot XPath Engine
++      const parser = new DOMParser();
++      // Function to (recursively) get all elements in the shadowRoot
++      function getAllChildElements(node) {
++        const elements = [];
++        const traverse = (currentNode) => {
++          if (currentNode.nodeType === Node.ELEMENT_NODE) elements.push(currentNode);
++          currentNode.childNodes?.forEach(traverse);
++        };
++        if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE || node.nodeType === Node.ELEMENT_NODE) {
++          traverse(node);
++        }
++
++        return elements;
++      }
++
++      // Setting innerHTMl and childElements (all, recursive) to avoid race conditions
++      const csrHTMLContent = root.innerHTML;
++      const csrChildElements = getAllChildElements(root);
++      const htmlDoc = parser.parseFromString(csrHTMLContent, 'text/html');
++      const rootDiv = htmlDoc.body
++      const rootDivChildElements = getAllChildElements(rootDiv);
++      // Use the namespace prefix in the XPath expression
++      const it = htmlDoc.evaluate(selector, htmlDoc, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE);
++      for (let node = it.iterateNext(); node; node = it.iterateNext()) {
++        // -1 for the body element
++        const nodeIndex = rootDivChildElements.indexOf(node) - 1;
++        if (nodeIndex >= 0) {
++          const originalNode = csrChildElements[nodeIndex];
++          if (originalNode.nodeType === Node.ELEMENT_NODE)
++            result.push(originalNode as Element);
++        }
++
++      }
++
++      return result;
++    }
++
++    
+     if (selector.startsWith('/') && root.nodeType !== Node.DOCUMENT_NODE)
+       selector = '.' + selector;
+     const result: Element[] = [];
 diff -ruN playwright/packages/playwright-core/src/server/javascript.ts patchright/packages/playwright-core/src/server/javascript.ts
---- playwright/packages/playwright-core/src/server/javascript.ts	2025-04-04 17:57:52.536067102 +0000
-+++ patchright/packages/playwright-core/src/server/javascript.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -154,17 +154,33 @@
+--- playwright/packages/playwright-core/src/server/javascript.ts	2025-06-14 21:50:46.342102400 +0200
++++ patchright/packages/playwright-core/src/server/javascript.ts	2025-06-14 21:53:22.273411300 +0200
+@@ -149,17 +149,33 @@
      return evaluate(this._context, false /* returnByValue */, pageFunction, this, arg);
    }
  
@@ -3210,9 +1887,9 @@ diff -ruN playwright/packages/playwright-core/src/server/javascript.ts patchrigh
    async getProperty(propertyName: string): Promise<JSHandle> {
      const objectHandle = await this.evaluateHandle((object: any, propertyName) => {
 diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/packages/playwright-core/src/server/page.ts
---- playwright/packages/playwright-core/src/server/page.ts	2025-04-04 17:57:52.537067108 +0000
-+++ patchright/packages/playwright-core/src/server/page.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -61,7 +61,7 @@
+--- playwright/packages/playwright-core/src/server/page.ts	2025-06-14 21:50:46.343602900 +0200
++++ patchright/packages/playwright-core/src/server/page.ts	2025-06-14 21:53:22.274412300 +0200
+@@ -60,7 +60,7 @@
    goForward(): Promise<boolean>;
    requestGC(): Promise<void>;
    addInitScript(initScript: InitScript): Promise<void>;
@@ -3221,7 +1898,7 @@ diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/pack
    closePage(runBeforeUnload: boolean): Promise<void>;
  
    navigateFrame(frame: frames.Frame, url: string, referrer: string | undefined): Promise<frames.GotoResult>;
-@@ -352,15 +352,15 @@
+@@ -351,15 +351,15 @@
        throw new Error(`Function "${name}" has been already registered in the browser context`);
      const binding = new PageBinding(name, playwrightBinding, needsHandle);
      this._pageBindings.set(name, binding);
@@ -3241,7 +1918,7 @@ diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/pack
    }
  
    setExtraHTTPHeaders(headers: types.HeadersArray) {
-@@ -577,8 +577,8 @@
+@@ -576,8 +576,8 @@
    }
  
    async _removeInitScripts() {
@@ -3252,19 +1929,19 @@ diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/pack
    }
  
    needsRequestInterception(): boolean {
-@@ -770,11 +770,6 @@
+@@ -769,11 +769,6 @@
        this._browserContext.addVisitedOrigin(origin);
    }
  
 -  allInitScripts() {
 -    const bindings = [...this._browserContext._pageBindings.values(), ...this._pageBindings.values()];
--    return [kBuiltinsScript, ...bindings.map(binding => binding.initScript), ...this._browserContext.initScripts, ...this.initScripts];
+-    return [...bindings.map(binding => binding.initScript), ...this._browserContext.initScripts, ...this.initScripts];
 -  }
 -
    getBinding(name: string) {
      return this._pageBindings.get(name) || this._browserContext._pageBindings.get(name);
    }
-@@ -811,6 +806,10 @@
+@@ -810,6 +805,10 @@
    markAsServerSideOnly() {
      this._isServerSideOnly = true;
    }
@@ -3275,7 +1952,7 @@ diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/pack
  }
  
  export class Worker extends SdkObject {
-@@ -848,30 +847,42 @@
+@@ -847,13 +846,29 @@
      this.openScope.close(new Error('Worker closed'));
    }
  
@@ -3310,6 +1987,10 @@ diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/pack
 +    }
  }
  
+ type BindingPayload = {
+@@ -863,20 +878,16 @@
+ };
+ 
  export class PageBinding {
 -  static kPlaywrightBinding = '__playwright__binding__';
 -
@@ -3322,23 +2003,38 @@ diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/pack
    constructor(name: string, playwrightFunction: frames.FunctionWithSource, needsHandle: boolean) {
      this.name = name;
      this.playwrightFunction = playwrightFunction;
--    this.initScript = new InitScript(createPageBindingScript(PageBinding.kPlaywrightBinding, name, needsHandle), true /* internal */);
+-    this.initScript = new InitScript(`(${addPageBinding.toString()})(${JSON.stringify(PageBinding.kPlaywrightBinding)}, ${JSON.stringify(name)}, ${needsHandle}, (${source})())`, true /* internal */);
 +    this.source = `(${addPageBinding.toString()})(${JSON.stringify(name)}, ${needsHandle}, (${source})())`;
      this.needsHandle = needsHandle;
 -    this.internal = name.startsWith('__pw');
    }
  
    static async dispatch(page: Page, payload: string, context: dom.FrameExecutionContext) {
-@@ -896,6 +907,8 @@
-       context.evaluate(deliverBindingResult, { name, seq, error }).catch(e => debugLogger.log('error', e));
+@@ -916,10 +927,13 @@
+       callbacks.delete(arg.seq);
      }
    }
 +
 +  readonly source: string;
  }
  
+-function addPageBinding(playwrightBinding: string, bindingName: string, needsHandle: boolean, utilityScriptSerializers: ReturnType<typeof source>) {
+-  const binding = (globalThis as any)[playwrightBinding];
++function addPageBinding(bindingName: string, needsHandle: boolean, utilityScriptSerializers: ReturnType<typeof source>) {
++  const binding = (globalThis as any)[bindingName];
++  if (binding && binding.toString().startsWith("(...args) => {")) return
+   (globalThis as any)[bindingName] = (...args: any[]) => {
+     const me = (globalThis as any)[bindingName];
+     if (needsHandle && args.slice(1).some(arg => arg !== undefined))
+@@ -953,7 +967,6 @@
+     binding(JSON.stringify(payload));
+     return promise;
+   };
+-  (globalThis as any)[bindingName].__installed = true;
+ }
+ 
  export class InitScript {
-@@ -905,14 +918,7 @@
+@@ -963,14 +976,7 @@
  
    constructor(source: string, internal?: boolean, name?: string) {
      const guid = createGuid();
@@ -3354,34 +2050,9 @@ diff -ruN playwright/packages/playwright-core/src/server/page.ts patchright/pack
      this.internal = !!internal;
      this.name = name;
    }
-diff -ruN playwright/packages/playwright-core/src/server/pageBinding.ts patchright/packages/playwright-core/src/server/pageBinding.ts
---- playwright/packages/playwright-core/src/server/pageBinding.ts	2025-04-04 17:57:52.537067108 +0000
-+++ patchright/packages/playwright-core/src/server/pageBinding.ts	2025-04-04 17:57:59.081107468 +0000
-@@ -26,10 +26,11 @@
-   serializedArgs?: SerializedValue[],
- };
- 
--function addPageBinding(playwrightBinding: string, bindingName: string, needsHandle: boolean, utilityScriptSerializersFactory: typeof source, builtins: Builtins) {
-+function addPageBinding(bindingName: string, needsHandle: boolean, utilityScriptSerializersFactory: typeof source, builtins: Builtins) {
-   const { serializeAsCallArgument } = utilityScriptSerializersFactory(builtins);
-   // eslint-disable-next-line no-restricted-globals
--  const binding = (globalThis as any)[playwrightBinding];
-+  const binding = (globalThis as any)[bindingName];
-+  if (binding && binding.toString().startsWith("(...args) => {")) return
-   // eslint-disable-next-line no-restricted-globals
-   (globalThis as any)[bindingName] = (...args: any[]) => {
-   // eslint-disable-next-line no-restricted-globals
-@@ -66,7 +67,6 @@
-     return promise;
-   };
-   // eslint-disable-next-line no-restricted-globals
--  (globalThis as any)[bindingName].__installed = true;
- }
- 
- export function takeBindingHandle(arg: { name: string, seq: number }) {
 diff -ruN playwright/packages/playwright-core/src/server/webkit/wkPage.ts patchright/packages/playwright-core/src/server/webkit/wkPage.ts
---- playwright/packages/playwright-core/src/server/webkit/wkPage.ts	2025-04-04 17:57:52.540067127 +0000
-+++ patchright/packages/playwright-core/src/server/webkit/wkPage.ts	2025-04-04 17:57:59.084107486 +0000
+--- playwright/packages/playwright-core/src/server/webkit/wkPage.ts	2025-06-14 21:50:46.302103100 +0200
++++ patchright/packages/playwright-core/src/server/webkit/wkPage.ts	2025-06-14 21:53:22.284915200 +0200
 @@ -768,7 +768,7 @@
      await this._updateBootstrapScript();
    }
@@ -3392,8 +2063,8 @@ diff -ruN playwright/packages/playwright-core/src/server/webkit/wkPage.ts patchr
    }
  
 diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/protocol/src/protocol.yml
---- playwright/packages/protocol/src/protocol.yml	2025-04-04 17:57:52.590067435 +0000
-+++ patchright/packages/protocol/src/protocol.yml	2025-04-04 17:57:59.272108655 +0000
+--- playwright/packages/protocol/src/protocol.yml	2025-06-14 21:50:45.787741400 +0200
++++ patchright/packages/protocol/src/protocol.yml	2025-06-14 21:53:22.726413400 +0200
 @@ -1,17 +1,3 @@
 -# Copyright (c) Microsoft Corporation.
 -#
@@ -3459,7 +2130,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    properties:
      n: number?
      b: boolean?
-@@ -70,19 +45,15 @@
+@@ -70,26 +45,21 @@
      v:
        type: enum?
        literals:
@@ -3481,37 +2152,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      u: string?
 -    # String representation of BigInt.
      bi: string?
--    # Typed array.
-     ta:
-       type: object?
-       properties:
-@@ -90,25 +61,23 @@
-         k:
-           type: enum
-           literals:
--          - i8
--          - ui8
--          - ui8c
--          - i16
--          - ui16
--          - i32
--          - ui32
--          - f32
--          - f64
--          - bi64
--          - bui64
 -    # Serialized Error object.
-+            - i8
-+            - ui8
-+            - ui8c
-+            - i16
-+            - ui16
-+            - i32
-+            - ui32
-+            - f32
-+            - f64
-+            - bi64
-+            - bui64
      e:
        type: object?
        properties:
@@ -3522,7 +2163,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      r:
        type: object?
        properties:
-@@ -117,7 +86,6 @@
+@@ -98,7 +68,6 @@
      a:
        type: array?
        items: SerializedValue
@@ -3530,7 +2171,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      o:
        type: array?
        items:
-@@ -125,15 +93,9 @@
+@@ -106,15 +75,9 @@
          properties:
            k: string
            v: SerializedValue
@@ -3546,7 +2187,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  SerializedArgument:
    type: object
    properties:
-@@ -141,8 +103,6 @@
+@@ -122,8 +85,6 @@
      handles:
        type: array
        items: Channel
@@ -3555,7 +2196,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  ExpectedTextValue:
    type: object
    properties:
-@@ -152,8 +112,6 @@
+@@ -133,8 +94,6 @@
      matchSubstring: boolean?
      ignoreCase: boolean?
      normalizeWhiteSpace: boolean?
@@ -3564,7 +2205,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  AXNode:
    type: object
    properties:
-@@ -177,15 +135,15 @@
+@@ -158,15 +117,15 @@
      checked:
        type: enum?
        literals:
@@ -3586,7 +2227,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      level: number?
      valuemin: number?
      valuemax: number?
-@@ -196,8 +154,6 @@
+@@ -177,8 +136,6 @@
      children:
        type: array?
        items: AXNode
@@ -3595,7 +2236,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  SetNetworkCookie:
    type: object
    properties:
-@@ -212,11 +168,9 @@
+@@ -193,11 +150,9 @@
      sameSite:
        type: enum?
        literals:
@@ -3610,7 +2251,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  NetworkCookie:
    type: object
    properties:
-@@ -230,17 +184,14 @@
+@@ -211,17 +166,14 @@
      sameSite:
        type: enum
        literals:
@@ -3631,7 +2272,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  IndexedDBDatabase:
    type: object
    properties:
-@@ -278,7 +229,6 @@
+@@ -259,7 +211,6 @@
                    items: string
                  multiEntry: boolean
                  unique: boolean
@@ -3639,7 +2280,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  SetOriginStorage:
    type: object
    properties:
-@@ -289,7 +239,6 @@
+@@ -270,7 +221,6 @@
      indexedDB:
        type: array?
        items: IndexedDBDatabase
@@ -3647,7 +2288,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  OriginStorage:
    type: object
    properties:
-@@ -300,7 +249,6 @@
+@@ -281,7 +231,6 @@
      indexedDB:
        type: array?
        items: IndexedDBDatabase
@@ -3655,7 +2296,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  SerializedError:
    type: object
    properties:
-@@ -311,8 +259,6 @@
+@@ -292,8 +241,6 @@
          name: string
          stack: string?
      value: SerializedValue?
@@ -3664,7 +2305,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  RecordHarOptions:
    type: object
    properties:
-@@ -320,19 +266,17 @@
+@@ -301,19 +248,17 @@
      content:
        type: enum?
        literals:
@@ -3689,7 +2330,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  FormField:
    type: object
    properties:
-@@ -344,15 +288,11 @@
+@@ -325,15 +270,11 @@
          name: string
          mimeType: string?
          buffer: binary
@@ -3705,7 +2346,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      fetch:
        parameters:
          url: string
-@@ -379,13 +319,11 @@
+@@ -360,13 +301,11 @@
          maxRetries: number?
        returns:
          response: APIResponse
@@ -3719,7 +2360,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      fetchLog:
        parameters:
          fetchUid: string
-@@ -393,7 +331,6 @@
+@@ -374,7 +313,6 @@
          log:
            type: array
            items: string
@@ -3727,7 +2368,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      storageState:
        parameters:
          indexedDB: boolean?
-@@ -404,16 +341,12 @@
+@@ -385,16 +323,12 @@
          origins:
            type: array
            items: OriginStorage
@@ -3744,7 +2385,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  APIResponse:
    type: object
    properties:
-@@ -424,16 +357,13 @@
+@@ -405,16 +339,13 @@
      headers:
        type: array
        items: NameValue
@@ -3765,7 +2406,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  CommonScreenshotOptions:
    type: mixin
    properties:
-@@ -441,18 +371,18 @@
+@@ -422,18 +353,18 @@
      caret:
        type: enum?
        literals:
@@ -3790,7 +2431,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      mask:
        type: array?
        items:
-@@ -462,7 +392,6 @@
+@@ -443,7 +374,6 @@
            selector: string
      maskColor: string?
      style: string?
@@ -3798,7 +2439,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  LaunchOptions:
    type: mixin
    properties:
-@@ -495,8 +424,6 @@
+@@ -476,8 +406,6 @@
      tracesDir: string?
      chromiumSandbox: boolean?
      firefoxUserPrefs: json?
@@ -3807,7 +2448,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  ContextOptions:
    type: mixin
    properties:
-@@ -549,42 +476,42 @@
+@@ -530,42 +458,42 @@
          send:
            type: enum?
            literals:
@@ -3868,7 +2509,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      baseURL: string?
      recordVideo:
        type: object?
-@@ -600,12 +527,10 @@
+@@ -581,12 +509,10 @@
      serviceWorkers:
        type: enum?
        literals:
@@ -3883,7 +2524,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    initializer:
      deviceDescriptors:
        type: array
-@@ -633,12 +558,10 @@
+@@ -614,12 +540,10 @@
                defaultBrowserType:
                  type: enum
                  literals:
@@ -3899,7 +2540,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      zip:
        parameters:
          zipFile: string
-@@ -652,14 +575,12 @@
+@@ -633,14 +557,12 @@
              - write
              - append
          includeSources: boolean
@@ -3914,7 +2555,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      harLookup:
        parameters:
          harId: string
-@@ -674,10 +595,10 @@
+@@ -655,10 +577,10 @@
          action:
            type: enum
            literals:
@@ -3929,7 +2570,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          message: string?
          redirectURL: string?
          status: number?
-@@ -685,16 +606,13 @@
+@@ -666,16 +588,13 @@
            type: array?
            items: NameValue
          body: binary?
@@ -3946,7 +2587,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      connect:
        parameters:
          wsEndpoint: string
-@@ -715,22 +633,18 @@
+@@ -689,42 +608,34 @@
          headers:
            type: array
            items: NameValue
@@ -3965,14 +2606,6 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      traceDiscarded:
        parameters:
          stacksId: string
--
-     globToRegex:
-       parameters:
-         glob: string
-@@ -738,27 +652,22 @@
-         webSocketUrl: boolean?
-       returns:
-         regex: string
 -
  Root:
    type: interface
@@ -4001,7 +2634,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    initializer:
      chromium: BrowserType
      firefox: BrowserType
-@@ -769,13 +678,9 @@
+@@ -735,13 +646,9 @@
      electron: Electron
      utils: LocalUtils?
      selectors: Selectors
@@ -4015,7 +2648,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    commands:
      newRequest:
        parameters:
-@@ -806,8 +711,8 @@
+@@ -771,8 +678,8 @@
              send:
                type: enum?
                literals:
@@ -4026,7 +2659,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          proxy:
            type: object?
            properties:
-@@ -826,10 +731,8 @@
+@@ -791,10 +698,8 @@
                type: array?
                items: SetOriginStorage
          tracesDir: string?
@@ -4037,7 +2670,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  RecorderSource:
    type: object
    properties:
-@@ -847,10 +750,8 @@
+@@ -812,10 +717,8 @@
            type: string
      revealLine: number?
      group: string?
@@ -4048,7 +2681,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    commands:
      initialize:
        parameters:
-@@ -858,21 +759,17 @@
+@@ -823,21 +726,17 @@
          sdkLanguage:
            type: enum
            literals:
@@ -4075,7 +2708,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setRecorderMode:
        parameters:
          mode:
-@@ -882,35 +779,26 @@
+@@ -847,35 +746,26 @@
              - recording
              - none
          testIdAttributeName: string?
@@ -4115,7 +2748,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      sourceChanged:
        parameters:
          text: string
-@@ -919,87 +807,68 @@
+@@ -884,87 +774,68 @@
          actions:
            type: array?
            items: string
@@ -4203,7 +2836,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      launchPersistentContext:
        parameters:
          $mixin1: LaunchOptions
-@@ -1008,7 +877,6 @@
+@@ -973,7 +844,6 @@
          slowMo: number?
        returns:
          context: BrowserContext
@@ -4211,7 +2844,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      connectOverCDP:
        parameters:
          endpointURL: string
-@@ -1027,26 +895,19 @@
+@@ -985,26 +855,19 @@
        returns:
          browser: Browser
          defaultContext: BrowserContext?
@@ -4239,7 +2872,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      newContext:
        parameters:
          $mixin: ContextOptions
-@@ -1068,7 +929,6 @@
+@@ -1026,7 +889,6 @@
                items: SetOriginStorage
        returns:
          context: BrowserContext
@@ -4247,7 +2880,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      newContextForReuse:
        parameters:
          $mixin: ContextOptions
-@@ -1090,15 +950,12 @@
+@@ -1048,15 +910,12 @@
                items: SetOriginStorage
        returns:
          context: BrowserContext
@@ -4263,7 +2896,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      startTracing:
        parameters:
          page: Page?
-@@ -1106,16 +963,11 @@
+@@ -1064,16 +923,11 @@
          categories:
            type: array?
            items: string
@@ -4281,7 +2914,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  ConsoleMessage:
    type: mixin
    properties:
-@@ -1130,11 +982,8 @@
+@@ -1088,11 +942,8 @@
          url: string
          lineNumber: number
          columnNumber: number
@@ -4293,7 +2926,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    commands:
      waitForEventInfo:
        parameters:
-@@ -1145,37 +994,30 @@
+@@ -1103,37 +954,30 @@
              phase:
                type: enum
                literals:
@@ -4334,7 +2967,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      clearCookies:
        parameters:
          name: string?
-@@ -1187,13 +1029,10 @@
+@@ -1145,13 +989,10 @@
          path: string?
          pathRegexSource: string?
          pathRegexFlags: string?
@@ -4349,7 +2982,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      cookies:
        parameters:
          urls:
-@@ -1203,37 +1042,30 @@
+@@ -1161,37 +1002,30 @@
          cookies:
            type: array
            items: NetworkCookie
@@ -4387,7 +3020,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setGeolocation:
        parameters:
          geolocation:
-@@ -1242,7 +1074,6 @@
+@@ -1200,7 +1034,6 @@
              longitude: number
              latitude: number
              accuracy: number?
@@ -4395,7 +3028,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setHTTPCredentials:
        parameters:
          httpCredentials:
-@@ -1251,7 +1082,6 @@
+@@ -1209,7 +1042,6 @@
              username: string
              password: string
              origin: string?
@@ -4403,7 +3036,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setNetworkInterceptionPatterns:
        parameters:
          patterns:
-@@ -1262,7 +1092,6 @@
+@@ -1220,7 +1052,6 @@
                glob: string?
                regexSource: string?
                regexFlags: string?
@@ -4411,7 +3044,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setWebSocketInterceptionPatterns:
        parameters:
          patterns:
-@@ -1273,11 +1102,9 @@
+@@ -1231,11 +1062,9 @@
                glob: string?
                regexSource: string?
                regexFlags: string?
@@ -4423,7 +3056,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      storageState:
        parameters:
          indexedDB: boolean?
-@@ -1288,19 +1115,17 @@
+@@ -1246,19 +1075,17 @@
          origins:
            type: array
            items: OriginStorage
@@ -4447,7 +3080,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          pauseOnNextStatement: boolean?
          testIdAttributeName: string?
          launchOptions: json?
-@@ -1310,27 +1135,23 @@
+@@ -1268,27 +1095,23 @@
          outputFile: string?
          handleSIGINT: boolean?
          omitCallTracking: boolean?
@@ -4475,7 +3108,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      createTempFiles:
        parameters:
          rootDirName: string?
-@@ -1346,127 +1167,100 @@
+@@ -1304,127 +1127,100 @@
          writableStreams:
            type: array
            items: WritableStream
@@ -4611,7 +3244,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    initializer:
      mainFrame: Frame
      viewportSize:
-@@ -1476,67 +1270,59 @@
+@@ -1434,67 +1230,59 @@
          height: number
      isClosed: boolean
      opener: Page?
@@ -4695,7 +3328,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      goBack:
        parameters:
          timeout: number?
-@@ -1546,7 +1332,6 @@
+@@ -1504,7 +1292,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4703,7 +3336,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      goForward:
        parameters:
          timeout: number?
-@@ -1556,25 +1341,20 @@
+@@ -1514,25 +1301,20 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4730,7 +3363,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      reload:
        parameters:
          timeout: number?
-@@ -1584,7 +1364,6 @@
+@@ -1542,7 +1324,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4738,7 +3371,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      expectScreenshot:
        parameters:
          expected: binary?
-@@ -1613,15 +1392,14 @@
+@@ -1571,15 +1352,14 @@
            items: string
        flags:
          snapshot: true
@@ -4756,7 +3389,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          quality: number?
          fullPage: boolean?
          clip: Rect?
-@@ -1630,13 +1408,11 @@
+@@ -1588,13 +1368,11 @@
          binary: binary
        flags:
          snapshot: true
@@ -4770,7 +3403,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setNetworkInterceptionPatterns:
        parameters:
          patterns:
-@@ -1647,7 +1423,6 @@
+@@ -1605,7 +1383,6 @@
                glob: string?
                regexSource: string?
                regexFlags: string?
@@ -4778,7 +3411,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setWebSocketInterceptionPatterns:
        parameters:
          patterns:
-@@ -1658,7 +1433,6 @@
+@@ -1616,7 +1393,6 @@
                glob: string?
                regexSource: string?
                regexFlags: string?
@@ -4786,7 +3419,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setViewportSize:
        parameters:
          viewportSize:
-@@ -1668,28 +1442,24 @@
+@@ -1626,28 +1402,24 @@
              height: number
        flags:
          snapshot: true
@@ -4815,7 +3448,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      keyboardType:
        parameters:
          text: string
-@@ -1697,7 +1467,6 @@
+@@ -1655,7 +1427,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4823,7 +3456,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      keyboardPress:
        parameters:
          key: string
-@@ -1705,7 +1474,6 @@
+@@ -1663,7 +1434,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4831,7 +3464,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      mouseMove:
        parameters:
          x: number
-@@ -1714,33 +1482,30 @@
+@@ -1672,33 +1442,30 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4871,7 +3504,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      mouseClick:
        parameters:
          x: number
-@@ -1749,14 +1514,13 @@
+@@ -1707,14 +1474,13 @@
          button:
            type: enum?
            literals:
@@ -4889,7 +3522,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      mouseWheel:
        parameters:
          deltaX: number
-@@ -1764,7 +1528,6 @@
+@@ -1722,7 +1488,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4897,7 +3530,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      touchscreenTap:
        parameters:
          x: number
-@@ -1772,7 +1535,6 @@
+@@ -1730,7 +1495,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -4905,7 +3538,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      accessibilitySnapshot:
        parameters:
          interestingOnly: boolean?
-@@ -1781,7 +1543,6 @@
+@@ -1739,7 +1503,6 @@
          rootAXNode: AXNode?
        flags:
          snapshot: true
@@ -4913,7 +3546,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      pdf:
        parameters:
          scale: number?
-@@ -1806,12 +1567,10 @@
+@@ -1764,12 +1527,10 @@
          outline: boolean?
        returns:
          pdf: binary
@@ -4926,7 +3559,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      stopJSCoverage:
        returns:
          entries:
-@@ -1837,11 +1596,9 @@
+@@ -1795,11 +1556,9 @@
                            startOffset: number
                            endOffset: number
                            count: number
@@ -4938,7 +3571,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      stopCSSCoverage:
        returns:
          entries:
-@@ -1858,81 +1615,61 @@
+@@ -1816,81 +1575,61 @@
                    properties:
                      start: number
                      end: number
@@ -5030,7 +3663,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    initializer:
      url: string
      name: string
-@@ -1940,9 +1677,7 @@
+@@ -1898,9 +1637,7 @@
      loadStates:
        type: array
        items: LifecycleEvent
@@ -5040,7 +3673,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      evalOnSelector:
        parameters:
          selector: string
-@@ -1954,7 +1689,6 @@
+@@ -1912,7 +1649,6 @@
          value: SerializedValue
        flags:
          snapshot: true
@@ -5048,7 +3681,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      evalOnSelectorAll:
        parameters:
          selector: string
-@@ -1965,7 +1699,6 @@
+@@ -1923,7 +1659,6 @@
          value: SerializedValue
        flags:
          snapshot: true
@@ -5056,7 +3689,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      addScriptTag:
        parameters:
          url: string?
-@@ -1975,7 +1708,6 @@
+@@ -1933,7 +1668,6 @@
          element: ElementHandle
        flags:
          snapshot: true
@@ -5064,7 +3697,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      addStyleTag:
        parameters:
          url: string?
-@@ -1984,7 +1716,6 @@
+@@ -1942,7 +1676,6 @@
          element: ElementHandle
        flags:
          snapshot: true
@@ -5072,7 +3705,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      ariaSnapshot:
        parameters:
          selector: string
-@@ -1992,14 +1723,13 @@
+@@ -1950,14 +1683,13 @@
          mode:
            type: enum?
            literals:
@@ -5089,7 +3722,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      blur:
        parameters:
          selector: string
-@@ -2008,7 +1738,6 @@
+@@ -1966,7 +1698,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -5097,7 +3730,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      check:
        parameters:
          selector: string
-@@ -2021,7 +1750,6 @@
+@@ -1979,7 +1710,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5105,7 +3738,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      click:
        parameters:
          selector: string
-@@ -2033,19 +1761,19 @@
+@@ -1991,19 +1721,19 @@
            items:
              type: enum
              literals:
@@ -5133,7 +3766,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          clickCount: number?
          timeout: number?
          trial: boolean?
-@@ -2053,13 +1781,11 @@
+@@ -2011,13 +1741,11 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5147,7 +3780,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      dragAndDrop:
        parameters:
          source: string
-@@ -2074,7 +1800,6 @@
+@@ -2032,7 +1760,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5155,7 +3788,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      dblclick:
        parameters:
          selector: string
-@@ -2085,26 +1810,25 @@
+@@ -2043,26 +1770,25 @@
            items:
              type: enum
              literals:
@@ -5190,7 +3823,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      dispatchEvent:
        parameters:
          selector: string
-@@ -2115,27 +1839,26 @@
+@@ -2073,27 +1799,26 @@
        flags:
          slowMo: true
          snapshot: true
@@ -5220,7 +3853,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      fill:
        parameters:
          selector: string
-@@ -2147,7 +1870,6 @@
+@@ -2105,7 +1830,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5228,7 +3861,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      focus:
        parameters:
          selector: string
-@@ -2156,15 +1878,12 @@
+@@ -2114,15 +1838,12 @@
        flags:
          slowMo: true
          snapshot: true
@@ -5244,7 +3877,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      getAttribute:
        parameters:
          selector: string
-@@ -2175,7 +1894,6 @@
+@@ -2133,7 +1854,6 @@
          value: string?
        flags:
          snapshot: true
@@ -5252,7 +3885,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      goto:
        parameters:
          url: string
-@@ -2187,7 +1905,6 @@
+@@ -2145,7 +1865,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -5260,7 +3893,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      hover:
        parameters:
          selector: string
-@@ -2198,11 +1915,11 @@
+@@ -2156,11 +1875,11 @@
            items:
              type: enum
              literals:
@@ -5277,7 +3910,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          position: Point?
          timeout: number?
          trial: boolean?
-@@ -2210,7 +1927,6 @@
+@@ -2168,7 +1887,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5285,7 +3918,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      innerHTML:
        parameters:
          selector: string
-@@ -2220,7 +1936,6 @@
+@@ -2178,7 +1896,6 @@
          value: string
        flags:
          snapshot: true
@@ -5293,7 +3926,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      innerText:
        parameters:
          selector: string
-@@ -2230,7 +1945,6 @@
+@@ -2188,7 +1905,6 @@
          value: string
        flags:
          snapshot: true
@@ -5301,7 +3934,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      inputValue:
        parameters:
          selector: string
-@@ -2240,7 +1954,6 @@
+@@ -2198,7 +1914,6 @@
          value: string
        flags:
          snapshot: true
@@ -5309,7 +3942,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      isChecked:
        parameters:
          selector: string
-@@ -2250,7 +1963,6 @@
+@@ -2208,7 +1923,6 @@
          value: boolean
        flags:
          snapshot: true
@@ -5317,7 +3950,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      isDisabled:
        parameters:
          selector: string
-@@ -2260,7 +1972,6 @@
+@@ -2218,7 +1932,6 @@
          value: boolean
        flags:
          snapshot: true
@@ -5325,7 +3958,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      isEnabled:
        parameters:
          selector: string
-@@ -2270,7 +1981,6 @@
+@@ -2228,7 +1941,6 @@
          value: boolean
        flags:
          snapshot: true
@@ -5333,7 +3966,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      isHidden:
        parameters:
          selector: string
-@@ -2279,7 +1989,6 @@
+@@ -2237,7 +1949,6 @@
          value: boolean
        flags:
          snapshot: true
@@ -5341,7 +3974,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      isVisible:
        parameters:
          selector: string
-@@ -2288,7 +1997,6 @@
+@@ -2246,7 +1957,6 @@
          value: boolean
        flags:
          snapshot: true
@@ -5349,7 +3982,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      isEditable:
        parameters:
          selector: string
-@@ -2298,7 +2006,6 @@
+@@ -2256,7 +1966,6 @@
          value: boolean
        flags:
          snapshot: true
@@ -5357,7 +3990,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      press:
        parameters:
          selector: string
-@@ -2311,7 +2018,6 @@
+@@ -2269,7 +1978,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5365,7 +3998,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      querySelector:
        parameters:
          selector: string
-@@ -2320,7 +2026,6 @@
+@@ -2278,7 +1986,6 @@
          element: ElementHandle?
        flags:
          snapshot: true
@@ -5373,7 +4006,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      querySelectorAll:
        parameters:
          selector: string
-@@ -2330,7 +2035,6 @@
+@@ -2288,7 +1995,6 @@
            items: ElementHandle
        flags:
          snapshot: true
@@ -5381,7 +4014,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      queryCount:
        parameters:
          selector: string
-@@ -2338,7 +2042,6 @@
+@@ -2296,7 +2002,6 @@
          value: number
        flags:
          snapshot: true
@@ -5389,7 +4022,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      selectOption:
        parameters:
          selector: string
-@@ -2365,7 +2068,6 @@
+@@ -2323,7 +2028,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5397,7 +4030,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      setContent:
        parameters:
          html: string
-@@ -2373,12 +2075,10 @@
+@@ -2331,12 +2035,10 @@
          waitUntil: LifecycleEvent?
        flags:
          snapshot: true
@@ -5410,7 +4043,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          payloads:
            type: array?
            items:
-@@ -2400,7 +2100,6 @@
+@@ -2358,7 +2060,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5418,7 +4051,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      tap:
        parameters:
          selector: string
-@@ -2411,11 +2110,11 @@
+@@ -2369,11 +2070,11 @@
            items:
              type: enum
              literals:
@@ -5435,7 +4068,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          position: Point?
          timeout: number?
          trial: boolean?
-@@ -2423,7 +2122,6 @@
+@@ -2381,7 +2082,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5443,7 +4076,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      textContent:
        parameters:
          selector: string
-@@ -2433,11 +2131,9 @@
+@@ -2391,11 +2091,9 @@
          value: string?
        flags:
          snapshot: true
@@ -5455,7 +4088,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      type:
        parameters:
          selector: string
-@@ -2449,7 +2145,6 @@
+@@ -2407,7 +2105,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5463,7 +4096,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      uncheck:
        parameters:
          selector: string
-@@ -2462,26 +2157,22 @@
+@@ -2420,26 +2117,22 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5490,7 +4123,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      waitForSelector:
        parameters:
          selector: string
-@@ -2490,16 +2181,15 @@
+@@ -2448,16 +2141,15 @@
          state:
            type: enum?
            literals:
@@ -5511,7 +4144,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      expect:
        parameters:
          selector: string
-@@ -2522,14 +2212,11 @@
+@@ -2480,14 +2172,11 @@
            items: string
        flags:
          snapshot: true
@@ -5526,7 +4159,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      navigated:
        parameters:
          url: string
-@@ -2539,68 +2226,55 @@
+@@ -2497,68 +2186,55 @@
            properties:
              request: Request?
          error: string?
@@ -5601,7 +4234,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      getPropertyList:
        returns:
          properties:
-@@ -2610,32 +2284,22 @@
+@@ -2568,32 +2244,22 @@
              properties:
                name: string
                value: JSHandle
@@ -5634,7 +4267,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      evalOnSelector:
        parameters:
          selector: string
-@@ -2647,7 +2311,6 @@
+@@ -2605,7 +2271,6 @@
          value: SerializedValue
        flags:
          snapshot: true
@@ -5642,7 +4275,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      evalOnSelectorAll:
        parameters:
          selector: string
-@@ -2658,13 +2321,11 @@
+@@ -2616,13 +2281,11 @@
          value: SerializedValue
        flags:
          snapshot: true
@@ -5656,7 +4289,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      check:
        parameters:
          force: boolean?
-@@ -2675,7 +2336,6 @@
+@@ -2633,7 +2296,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5664,7 +4297,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      click:
        parameters:
          force: boolean?
-@@ -2685,19 +2345,19 @@
+@@ -2643,19 +2305,19 @@
            items:
              type: enum
              literals:
@@ -5692,7 +4325,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          clickCount: number?
          timeout: number?
          trial: boolean?
-@@ -2705,13 +2365,11 @@
+@@ -2663,13 +2325,11 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5706,7 +4339,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      dblclick:
        parameters:
          force: boolean?
-@@ -2720,26 +2378,25 @@
+@@ -2678,26 +2338,25 @@
            items:
              type: enum
              literals:
@@ -5741,7 +4374,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      dispatchEvent:
        parameters:
          type: string
-@@ -2747,7 +2404,6 @@
+@@ -2705,7 +2364,6 @@
        flags:
          slowMo: true
          snapshot: true
@@ -5749,7 +4382,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      fill:
        parameters:
          value: string
-@@ -2757,22 +2413,18 @@
+@@ -2715,22 +2373,18 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5772,7 +4405,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      hover:
        parameters:
          force: boolean?
-@@ -2781,11 +2433,11 @@
+@@ -2739,11 +2393,11 @@
            items:
              type: enum
              literals:
@@ -5789,7 +4422,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          position: Point?
          timeout: number?
          trial: boolean?
-@@ -2793,65 +2445,54 @@
+@@ -2751,65 +2405,54 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5855,7 +4488,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      press:
        parameters:
          key: string
-@@ -2862,7 +2503,6 @@
+@@ -2820,7 +2463,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5863,7 +4496,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      querySelector:
        parameters:
          selector: string
-@@ -2871,7 +2511,6 @@
+@@ -2829,7 +2471,6 @@
          element: ElementHandle?
        flags:
          snapshot: true
@@ -5871,7 +4504,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      querySelectorAll:
        parameters:
          selector: string
-@@ -2881,29 +2520,26 @@
+@@ -2839,29 +2480,26 @@
            items: ElementHandle
        flags:
          snapshot: true
@@ -5903,7 +4536,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      selectOption:
        parameters:
          elements:
-@@ -2928,7 +2564,6 @@
+@@ -2886,7 +2524,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5911,7 +4544,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      selectText:
        parameters:
          force: boolean?
-@@ -2936,10 +2571,8 @@
+@@ -2894,10 +2531,8 @@
        flags:
          slowMo: true
          snapshot: true
@@ -5922,7 +4555,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          payloads:
            type: array?
            items:
-@@ -2961,7 +2594,6 @@
+@@ -2919,7 +2554,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5930,7 +4563,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      tap:
        parameters:
          force: boolean?
-@@ -2970,11 +2602,11 @@
+@@ -2928,11 +2562,11 @@
            items:
              type: enum
              literals:
@@ -5947,7 +4580,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          position: Point?
          timeout: number?
          trial: boolean?
-@@ -2982,13 +2614,11 @@
+@@ -2940,13 +2574,11 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5961,7 +4594,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      type:
        parameters:
          text: string
-@@ -2998,7 +2628,6 @@
+@@ -2956,7 +2588,6 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5969,7 +4602,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      uncheck:
        parameters:
          force: boolean?
-@@ -3009,22 +2638,20 @@
+@@ -2967,22 +2598,20 @@
          slowMo: true
          snapshot: true
          pausesBeforeInput: true
@@ -5998,7 +4631,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      waitForSelector:
        parameters:
          selector: string
-@@ -3033,19 +2660,16 @@
+@@ -2991,19 +2620,16 @@
          state:
            type: enum?
            literals:
@@ -6022,7 +4655,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    initializer:
      frame: Frame?
      serviceWorker: Worker?
-@@ -3058,36 +2682,26 @@
+@@ -3016,36 +2642,26 @@
        items: NameValue
      isNavigationRequest: boolean
      redirectedFrom: Request?
@@ -6059,7 +4692,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      continue:
        parameters:
          url: string?
-@@ -3097,10 +2711,8 @@
+@@ -3055,10 +2671,8 @@
            items: NameValue
          postData: binary?
          isFallback: boolean
@@ -6070,7 +4703,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          status: number?
          headers:
            type: array?
-@@ -3108,67 +2720,50 @@
+@@ -3066,67 +2680,50 @@
          body: string?
          isBase64: boolean?
          fetchResponseUid: string?
@@ -6140,7 +4773,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  ResourceTiming:
    type: object
    properties:
-@@ -3180,10 +2775,8 @@
+@@ -3138,10 +2735,8 @@
      connectEnd: number
      requestStart: number
      responseStart: number
@@ -6151,7 +4784,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    initializer:
      request: Request
      url: string
-@@ -3194,33 +2787,24 @@
+@@ -3152,33 +2747,24 @@
        items: NameValue
      timing: ResourceTiming
      fromServiceWorker: boolean
@@ -6185,7 +4818,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  SecurityDetails:
    type: object
    properties:
-@@ -3229,7 +2813,6 @@
+@@ -3187,7 +2773,6 @@
      subjectName: string?
      validFrom: number?
      validTo: number?
@@ -6193,7 +4826,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  RequestSizes:
    type: object
    properties:
-@@ -3237,46 +2820,32 @@
+@@ -3195,46 +2780,32 @@
      requestHeadersSize: number
      responseBodySize: number
      responseHeadersSize: number
@@ -6242,7 +4875,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    initializer:
      frame: Frame
      name: string
-@@ -3284,56 +2853,40 @@
+@@ -3242,56 +2813,40 @@
        type: array?
        items: SerializedValue
      handle: JSHandle?
@@ -6300,7 +4933,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      tracingGroup:
        parameters:
          name: string
-@@ -3343,117 +2896,77 @@
+@@ -3301,117 +2856,77 @@
              file: string
              line: number?
              column: number?
@@ -6428,7 +5061,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      launch:
        parameters:
          executablePath: string?
-@@ -3468,17 +2981,17 @@
+@@ -3426,17 +2941,17 @@
          acceptDownloads:
            type: enum?
            literals:
@@ -6453,7 +5086,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
          extraHTTPHeaders:
            type: array?
            items: NameValue
-@@ -3510,27 +3023,19 @@
+@@ -3468,27 +2983,19 @@
          strictSelectors: boolean?
          timezoneId: string?
          tracesDir: string?
@@ -6481,7 +5114,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      evaluateExpression:
        parameters:
          expression: string
-@@ -3538,7 +3043,6 @@
+@@ -3496,7 +3003,6 @@
          arg: SerializedArgument
        returns:
          value: SerializedValue
@@ -6489,7 +5122,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      evaluateExpressionHandle:
        parameters:
          expression: string
-@@ -3546,26 +3050,21 @@
+@@ -3504,26 +3010,21 @@
          arg: SerializedArgument
        returns:
          handle: JSHandle
@@ -6518,7 +5151,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      devices:
        parameters:
          host: string?
-@@ -3575,36 +3074,27 @@
+@@ -3533,36 +3034,27 @@
          devices:
            type: array
            items: AndroidDevice
@@ -6557,7 +5190,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
    commands:
      wait:
        parameters:
-@@ -3612,123 +3102,106 @@
+@@ -3570,123 +3062,106 @@
          state:
            type: enum?
            literals:
@@ -6694,7 +5327,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
      launchBrowser:
        parameters:
          $mixin: ContextOptions
-@@ -3743,67 +3216,52 @@
+@@ -3701,67 +3176,52 @@
              bypass: string?
              username: string?
              password: string?
@@ -6764,7 +5397,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  AndroidSelector:
    type: object
    properties:
-@@ -3831,8 +3289,6 @@
+@@ -3789,8 +3249,6 @@
      scrollable: boolean?
      selected: boolean?
      text: string?
@@ -6773,7 +5406,7 @@ diff -ruN playwright/packages/protocol/src/protocol.yml patchright/packages/prot
  AndroidElementInfo:
    type: object
    properties:
-@@ -3854,24 +3310,17 @@
+@@ -3812,24 +3270,17 @@
      longClickable: boolean
      scrollable: boolean
      selected: boolean
