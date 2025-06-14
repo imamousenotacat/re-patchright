@@ -948,7 +948,7 @@ const resultPromise = await controller.run(async progress => {
     return handle ? handles.length : 0;
   }, 'returnAll');
   return promise;
-}, 10000); // A bit geeky but its okay :D
+}); // <<< REMOVED ', 10000' // A bit geeky but its okay :D => IT'S NOT OKAY. I PREFER TO SET THE TIMEOUT EXTERNALLY ...
 return resultPromise ? resultPromise : 0;
 `);
 
