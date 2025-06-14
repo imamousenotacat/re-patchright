@@ -2403,6 +2403,43 @@ targetIfStatementInSelectorEvaluator.replaceWithText(
 if (element === context.scope && !simple.functions.length)
   return false;`);
 
+// ---- Modification for _queryCSS method in SelectorEvaluatorImpl ----
+const queryCSSMethod = selectorEvaluatorClass.getMethodOrThrow("_queryCSS");
+
+// Find the this._cached(...) call within _queryCSS
+const cachedCallInQueryCSS = queryCSSMethod.getDescendantsOfKind(SyntaxKind.CallExpression)
+    .find(call => call.getExpression().getText().endsWith("this._cached"));
+
+// The arrow function is an argument to this._cached
+const arrowFuncInQueryCSS = cachedCallInQueryCSS.getArguments()
+    .find(arg => arg.getKind() === SyntaxKind.ArrowFunction)
+    .asKindOrThrow(SyntaxKind.ArrowFunction);
+
+// Find the 'query(context.scope);' statement within the arrow function's body
+const targetQueryCallStatementInQueryCSS = arrowFuncInQueryCSS.getDescendantsOfKind(SyntaxKind.ExpressionStatement)
+    .find(stmt => {
+        if (stmt.getKind() === SyntaxKind.ExpressionStatement) {
+            const expr = stmt.asKindOrThrow(SyntaxKind.ExpressionStatement).getExpression();
+            if (expr.getKind() === SyntaxKind.CallExpression) {
+                const callExpr = expr.asKindOrThrow(SyntaxKind.CallExpression);
+                return callExpr.getExpression().getText() === "query" &&
+                       callExpr.getArguments().length === 1 &&
+                       callExpr.getArguments()[0].getText() === "context.scope";
+            }
+        }
+        return false;
+    });
+
+targetQueryCallStatementInQueryCSS.replaceWithText(
+`/* TODO: PVM14 There was an edge case (using ">*" locator when the scope is the direct child of a closed shadow root) not working
+    and it was critical for my logic. To make it work I had to do this:
+    This is the most failsafe way I can think of introducing my Fix for taking into account the manoeuvre
+    in 'parentElementOrShadowHost'...  In this case 'scope' is equal to 'host' and we need to resort to 'originalScope' */
+if (context?.originalScope?.parentNode?.mode == 'closed')
+  query(context.originalScope);
+else
+  query(context.scope);`);
+
 // Save the changes without reformatting
 project.saveSync();
 
