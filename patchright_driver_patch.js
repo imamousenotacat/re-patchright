@@ -2236,6 +2236,21 @@ selectorsSourceFile.insertImportDeclarations(targetStatementIndex, [{
 }]);
 const frameSelectorsClass = selectorsSourceFile.getClassOrThrow("FrameSelectors");
 
+// -- _resolveFrameForSelector Method Modifications --
+
+// 1. Modify 'const element = handle.asElement() ...' to 'let element = handle.asElement();'
+const resolveFrameForSelectorMethod = frameSelectorsClass.getMethod("resolveFrameForSelector");
+const constElementDeclaration =
+  resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.VariableStatement)
+    .find(declaration => declaration.getText().includes("const element = handle.asElement()"));
+constElementDeclaration.setDeclarationKind("let");
+
+// 2. My modification: instead of giving up, look for the frame in closed shadowRoot objects
+const resolveFrameForSelectorIfStatement = resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement => statement.getExpression().getText() === "!element" && statement.getThenStatement().getText() === "return null;");
+resolveFrameForSelectorIfStatement.replaceWithText(
+`if (!element) // My modification: instead of giving up, look for the frame in closed shadowRoot objects
+  element = await this.lookForFrameInClosedShadowRoots(frame, injectedScript, info, stringifySelector(info.parsed))`);
+
 // -- queryArrayInMainWorld Method --
 const queryArrayInMainWorldMethod = frameSelectorsClass.getMethodOrThrow("queryArrayInMainWorld");
 queryArrayInMainWorldMethod.setBodyText(`
