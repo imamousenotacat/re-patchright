@@ -2380,6 +2380,29 @@ if (elements.length > 1) {
 return elements.length === 1 ? elements[0] : null;
 `);
 
+// ----------------------------
+// injected/selectorEvaluator.ts
+// ----------------------------
+const selectorEvaluatorSourceFile = project.addSourceFileAtPath(
+  "packages/playwright-core/src/server/injected/selectorEvaluator.ts"
+);
+const selectorEvaluatorClass = selectorEvaluatorSourceFile.getClassOrThrow("SelectorEvaluatorImpl");
+const matchesSimpleMethod = selectorEvaluatorClass.getMethodOrThrow("_matchesSimple");
+
+const targetIfStatementInSelectorEvaluator = matchesSimpleMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement =>
+  statement.getExpression().getText() === "element === context.scope" &&
+  statement.getThenStatement().getText().trim() === "return false;"
+);
+
+targetIfStatementInSelectorEvaluator.replaceWithText(
+`/* TODO: PVM14 There was and edge case for parsed "> *" window.__injectedScript.querySelectorAll(parsed, document.children[0]); =[].
+  I had to do this:
+  If the element is the context.scope, it cannot match if there are no functions. This prevents a simple selector like html
+  (where simple.css is "html" and simple.functions is empty) from matching when context.scope is <html> during an ancestor check.
+  A match for the scope element itself requires an explicit function like :scope */
+if (element === context.scope && !simple.functions.length)
+  return false;`);
+
 // Save the changes without reformatting
 project.saveSync();
 
