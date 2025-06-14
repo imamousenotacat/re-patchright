@@ -2440,6 +2440,28 @@ if (context?.originalScope?.parentNode?.mode == 'closed')
 else
   query(context.scope);`);
 
+// ---- Modification in 'matches' method in SelectorEngine 'scopeEngine' implementation ----
+// Find the 'scopeEngine' variable declaration
+const scopeEngineVariableDeclaration = selectorEvaluatorSourceFile.getVariableDeclarationOrThrow("scopeEngine");
+
+// Find the object literal for the 'scopeEngine' 
+const scopeEngineObjectLiteral = scopeEngineVariableDeclaration.getInitializerIfKindOrThrow(SyntaxKind.ObjectLiteralExpression);
+const matchesMethodDeclaration = scopeEngineObjectLiteral.getProperty("matches").asKindOrThrow(SyntaxKind.MethodDeclaration);
+const matchesFunctionBody = matchesMethodDeclaration.getBody();
+
+const targetIfStatementNodeNine = matchesFunctionBody.getStatements().find(stmt =>
+    stmt.getKind() === SyntaxKind.IfStatement &&
+    stmt.asKindOrThrow(SyntaxKind.IfStatement).getExpression().getText() === "actualScope.nodeType === 9"
+);
+
+const indexOfTargetIf = matchesFunctionBody.getStatements().indexOf(targetIfStatementNodeNine);
+
+matchesFunctionBody.insertStatements(indexOfTargetIf + 1, 
+`/* TODO: PVM14 There was an edge case (using ">*" locator when the scope is the closed shadow root) not working and it was
+    critical for my logic. To make it work I had to do this: Taking into account the manoeuvre in 'parentElementOrShadowHost' ... */
+if (actualScope.nodeType === 11)
+  return element === actualScope.host;`);
+
 // Save the changes without reformatting
 project.saveSync();
 
