@@ -1361,35 +1361,43 @@ return finalArrayHandle;`
 );
 
 // -- resolveFrameForSelector Method --
+
+// 1. Modify 'const element = handle.asElement() ...' to 'let element = handle.asElement();'
 const resolveFrameForSelectorMethod = frameSelectorsClass.getMethod("resolveFrameForSelector");
 const constElementDeclaration = resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.VariableStatement)
   .find(declaration => declaration.getText().includes("const element = handle.asElement()"));
 constElementDeclaration.setDeclarationKind("let");
 
-const resolveFrameForSelectorIfStatement = resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement => statement.getExpression().getText() === "!element" && statement.getThenStatement().getText() === "return null;");
-resolveFrameForSelectorIfStatement.replaceWithText(`if (!element) {
-  try {
-    var client = frame._page._delegate._sessionForFrame(frame)._client;
-  } catch (e) {
-    var client = frame._page._delegate._mainFrameSession._client;
-  }
-  var mainContext = await frame._context("main");
-  const documentNode = await client.send("Runtime.evaluate", {
-    expression: "document",
-    serializationOptions: {
-      serialization: "idOnly"
-    },
-    contextId: mainContext.delegate._contextId
-  });
-  const documentScope = new ElementHandle(mainContext, documentNode.result.objectId);
-  var check = await this._customFindFramesByParsed(injectedScript, client, mainContext, documentScope, info.parsed);
-  if (check.length > 0) {
-    element = check[0];
-  } else {
-    return null;
-  }
-}`);
+//const resolveFrameForSelectorIfStatement = resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement => statement.getExpression().getText() === "!element" && statement.getThenStatement().getText() === "return null;");
+//resolveFrameForSelectorIfStatement.replaceWithText(`if (!element) {
+//  try {
+//    var client = frame._page._delegate._sessionForFrame(frame)._client;
+//  } catch (e) {
+//    var client = frame._page._delegate._mainFrameSession._client;
+//  }
+//  var mainContext = await frame._context("main");
+//  const documentNode = await client.send("Runtime.evaluate", {
+//    expression: "document",
+//    serializationOptions: {
+//      serialization: "idOnly"
+//    },
+//    contextId: mainContext.delegate._contextId
+//  });
+//  const documentScope = new ElementHandle(mainContext, documentNode.result.objectId);
+//  var check = await this._customFindFramesByParsed(injectedScript, client, mainContext, documentScope, info.parsed);
+//  if (check.length > 0) {
+//    element = check[0];
+//  } else {
+//    return null;
+//  }
+//}`);
 
+// I APPLY MY MODIFICATION INSTEAD THAT SEEMS TO WORK BETTER FOR MY USE CASE
+// 2. My modification: instead of giving up, look for the frame in closed shadowRoot objects
+const resolveFrameForSelectorIfStatement = resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement => statement.getExpression().getText() === "!element" && statement.getThenStatement().getText() === "return null;");
+resolveFrameForSelectorIfStatement.replaceWithText(
+`if (!element) // My modification: instead of giving up, look for the frame in closed shadowRoot objects
+  element = await this.lookForFrameInClosedShadowRoots(frame, injectedScript, info, stringifySelector(info.parsed))`);
 
 // -- _customFindFramesByParsed Method --
 frameSelectorsClass.addMethod({
