@@ -2569,6 +2569,90 @@ queryAllMethodBody.insertStatements(0, [
   ""
 ]);
 
+// ----------------------------
+// injected/selectorEvaluator.ts
+// ----------------------------
+const selectorEvaluatorSourceFile = project.addSourceFileAtPath(
+  // I HAS BEEN MOVED IN v1.52.0 TO ANOTHER PLACE ...
+  // "packages/playwright-core/src/server/injected/selectorEvaluator.ts"
+  "packages/injected/src/selectorEvaluator.ts"
+);
+const selectorEvaluatorClass = selectorEvaluatorSourceFile.getClassOrThrow("SelectorEvaluatorImpl");
+const matchesSimpleMethod = selectorEvaluatorClass.getMethodOrThrow("_matchesSimple");
+
+const targetIfStatementInSelectorEvaluator = matchesSimpleMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement =>
+  statement.getExpression().getText() === "element === context.scope" &&
+  statement.getThenStatement().getText().trim() === "return false;"
+);
+
+targetIfStatementInSelectorEvaluator.replaceWithText(
+`/* TODO: PVM14 There was and edge case for parsed "> *" window.__injectedScript.querySelectorAll(parsed, document.children[0]); =[].
+  I had to do this:
+  If the element is the context.scope, it cannot match if there are no functions. This prevents a simple selector like html
+  (where simple.css is "html" and simple.functions is empty) from matching when context.scope is <html> during an ancestor check.
+  A match for the scope element itself requires an explicit function like :scope */
+if (element === context.scope && !simple.functions.length)
+  return false;`);
+
+// ---- Modification for _queryCSS method in SelectorEvaluatorImpl ----
+const queryCSSMethod = selectorEvaluatorClass.getMethodOrThrow("_queryCSS");
+
+// Find the this._cached(...) call within _queryCSS
+const cachedCallInQueryCSS = queryCSSMethod.getDescendantsOfKind(SyntaxKind.CallExpression)
+    .find(call => call.getExpression().getText().endsWith("this._cached"));
+
+// The arrow function is an argument to this._cached
+const arrowFuncInQueryCSS = cachedCallInQueryCSS.getArguments()
+    .find(arg => arg.getKind() === SyntaxKind.ArrowFunction)
+    .asKindOrThrow(SyntaxKind.ArrowFunction);
+
+// Find the 'query(context.scope);' statement within the arrow function's body
+const targetQueryCallStatementInQueryCSS = arrowFuncInQueryCSS.getDescendantsOfKind(SyntaxKind.ExpressionStatement)
+    .find(stmt => {
+        if (stmt.getKind() === SyntaxKind.ExpressionStatement) {
+            const expr = stmt.asKindOrThrow(SyntaxKind.ExpressionStatement).getExpression();
+            if (expr.getKind() === SyntaxKind.CallExpression) {
+                const callExpr = expr.asKindOrThrow(SyntaxKind.CallExpression);
+                return callExpr.getExpression().getText() === "query" &&
+                       callExpr.getArguments().length === 1 &&
+                       callExpr.getArguments()[0].getText() === "context.scope";
+            }
+        }
+        return false;
+    });
+
+targetQueryCallStatementInQueryCSS.replaceWithText(
+`/* TODO: PVM14 There was an edge case (using ">*" locator when the scope is the direct child of a closed shadow root) not working
+    and it was critical for my logic. To make it work I had to do this:
+    This is the most failsafe way I can think of introducing my Fix for taking into account the manoeuvre
+    in 'parentElementOrShadowHost'...  In this case 'scope' is equal to 'host' and we need to resort to 'originalScope' */
+if (context?.originalScope?.parentNode?.mode == 'closed')
+  query(context.originalScope);
+else
+  query(context.scope);`);
+
+// ---- Modification in 'matches' method in SelectorEngine 'scopeEngine' implementation ----
+// Find the 'scopeEngine' variable declaration
+const scopeEngineVariableDeclaration = selectorEvaluatorSourceFile.getVariableDeclarationOrThrow("scopeEngine");
+
+// Find the object literal for the 'scopeEngine'
+const scopeEngineObjectLiteral = scopeEngineVariableDeclaration.getInitializerIfKindOrThrow(SyntaxKind.ObjectLiteralExpression);
+const matchesMethodDeclaration = scopeEngineObjectLiteral.getProperty("matches").asKindOrThrow(SyntaxKind.MethodDeclaration);
+const matchesFunctionBody = matchesMethodDeclaration.getBody();
+
+const targetIfStatementNodeNine = matchesFunctionBody.getStatements().find(stmt =>
+    stmt.getKind() === SyntaxKind.IfStatement &&
+    stmt.asKindOrThrow(SyntaxKind.IfStatement).getExpression().getText() === "actualScope.nodeType === 9"
+);
+
+const indexOfTargetIf = matchesFunctionBody.getStatements().indexOf(targetIfStatementNodeNine);
+
+matchesFunctionBody.insertStatements(indexOfTargetIf + 1,
+`/* TODO: PVM14 There was an edge case (using ">*" locator when the scope is the closed shadow root) not working and it was
+    critical for my logic. To make it work I had to do this: Taking into account the manoeuvre in 'parentElementOrShadowHost' ... */
+if (actualScope.nodeType === 11)
+  return element === actualScope.host;`);
+
 // Save the changes without reformatting
 project.saveSync();
 
