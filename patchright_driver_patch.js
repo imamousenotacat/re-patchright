@@ -1243,12 +1243,12 @@ return currentScopingElements;`);
 const frameSelectorsSourceFile = project.addSourceFileAtPath(
   "packages/playwright-core/src/server/frameSelectors.ts",
 );
-// Add the custom import and comment at the start of the file
-frameSelectorsSourceFile.insertStatements(0, [
-  "// patchright - custom imports",
-  "import { ElementHandle } from './dom';",
-  "",
-]);
+// Add the custom import and comment at the start of the file => NOT REALLY NEEDED: THERE IS A playwright IMPORT FOR ElementHandle
+// frameSelectorsSourceFile.insertStatements(0, [
+//   "// patchright - custom imports",
+//   "import { ElementHandle } from './dom';",
+//   "",
+// ]);
 // Fifteen lines of code to insert a simple import. There has to be a better way :-(
 const newImportModuleSpecifier = "./dom";
 const newImportNamedImport = "NonRecoverableDOMError";
@@ -1526,6 +1526,51 @@ while (parsed.parts.length > 0) {
   }
 }
 return currentScopingElements;`);
+
+// -- lookForFrameInClosedShadowRoots Method --
+frameSelectorsClass.addMethod({
+  name: "lookForFrameInClosedShadowRoots",
+  isAsync: true,
+  parameters: [
+    { name: "frame" },
+    { name: "injectedScript" },
+    { name: "info" },
+    { name: "selectorString" },
+  ],
+}).setBodyText(`const closedShadowRoots = await frame.getClosedShadowRoots()
+const elements = []
+for (const shadowRootHandle of closedShadowRoots) {
+  const handle = await injectedScript.evaluateHandle((remoteInjectedScript, {
+    info,
+    scope,
+    selectorString
+  }) => {
+    const element = remoteInjectedScript.querySelector(info.parsed, scope, info.strict);
+    if (element && element.nodeName !== 'IFRAME' && element.nodeName !== 'FRAME')
+      throw remoteInjectedScript.createStacklessError(\`Selector "\${selectorString}" resolved to \${remoteInjectedScript.previewNode(element)}, <iframe> was expected\`);
+    return element;
+  }, {
+    info,
+    scope: shadowRootHandle,
+    selectorString
+  });
+  const element = handle.asElement();
+  if (element) elements.push(element)
+  // Getting rid of the shadowRootHandle after using it to avoid creating memory leaks ...
+  await shadowRootHandle.dispose();
+}
+
+if (elements.length > 1) {
+  // We throw a NonRecoverableDOMError indicating multiple frames found within closed shadow roots.
+  // I'm not sure if this is really an error but I want to see it when it happens and I want it to stop the execution ...
+  const elementsPreview = elements.map(e => e.toString()).join(', ');
+  throw new NonRecoverableDOMError(\`Selector "\${selectorString}" resolved to \${elements.length} elements in closed shadow roots: [\${elementsPreview}]. Expected 1 frame element.\`);
+}
+
+// Return the single element found, or null if none were found.
+return elements.length === 1 ? elements[0] : null;
+`);
+
 
 // -- getClosedShadowRoots Method --
 frameClass.addMethod({
