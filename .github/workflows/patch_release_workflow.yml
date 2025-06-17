@@ -1,6 +1,7 @@
 name: Trigger on Commit and Manual Request
 
-# on:
+on:
+  workflow_dispatch:
 #   push:
 #     branches:
 #       - "main"
