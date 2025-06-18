@@ -6,7 +6,7 @@ on:
     inputs:
       version:
         description: 'Playwright Version'
-        default: ''
+        default: 'v1.52.0'
   # running every hour
   schedule:
     - cron: '48 * * * *'
