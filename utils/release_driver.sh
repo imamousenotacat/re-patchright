@@ -1,6 +1,6 @@
 echo "Patching complete. Uploading to GitHub..."
 VERSION_NUMBER="${playwright_version#v}"
-RELEASE_DESCRIPTION="This is an automatic deployment in response to a new release of [microsoft/playwright](https://github.com/microsoft/playwright).\nThe original Release can be seen [here](https://github.com/microsoft/playwright/releases/tag/$playwright_version)."
+RELEASE_DESCRIPTION="This is a manual deployment of a patched version of [microsoft/playwright](https://github.com/microsoft/playwright).\nThe original Release can be seen [here](https://github.com/microsoft/playwright/releases/tag/$playwright_version)."
 
 # Step 1: Create a new GitHub release and get the upload URL
 RELEASE_RESPONSE=$(curl -s -X POST \
