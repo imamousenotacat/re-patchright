@@ -1096,7 +1096,7 @@ while (parsed.parts.length > 0) {
 
   if (part.name == "nth") {
     const partNth = Number(part.body);
-    if (partNth > currentScopingElements.length-1 || partNth < -(currentScopingElements.length-1)) {
+    if (partNth > currentScopingElements.length || partNth < -currentScopingElements.length)) {
           throw new Error("Can't query n-th element");
     } else {
       currentScopingElements = [currentScopingElements.at(partNth)];
