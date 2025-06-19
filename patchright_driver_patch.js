@@ -2212,14 +2212,11 @@ queryAllMethodBody.insertStatements(0, [
 const selectorsSourceFile = project.addSourceFileAtPath(
   "packages/playwright-core/src/server/frameSelectors.ts"
 );
-
 const newImportModuleSpecifier = "./dom";
 const newImportNamedImport = "NonRecoverableDOMError";
-
 // Fifteen lines of code to insert a simple import. There has to be a better way :-(
 let targetStatementIndex = 0; // Default to inserting at the beginning
 const importDeclarations = selectorsSourceFile.getImportDeclarations();
-
 // Find the target 'ParsedSelector' import to insert after
 for (const imp of importDeclarations) {
     if (imp.getModuleSpecifierValue() === '../utils/isomorphic/selectorParser' && // Check module path
@@ -2229,15 +2226,12 @@ for (const imp of importDeclarations) {
         break;
     }
 }
-
 selectorsSourceFile.insertImportDeclarations(targetStatementIndex, [{
     moduleSpecifier: newImportModuleSpecifier,
     namedImports: [{ name: newImportNamedImport }],
 }]);
 const frameSelectorsClass = selectorsSourceFile.getClassOrThrow("FrameSelectors");
-
 // -- _resolveFrameForSelector Method Modifications --
-
 // 1. Modify 'const element = handle.asElement() ...' to 'let element = handle.asElement();'
 const resolveFrameForSelectorMethod = frameSelectorsClass.getMethod("resolveFrameForSelector");
 const constElementDeclaration =
@@ -2249,7 +2243,9 @@ constElementDeclaration.setDeclarationKind("let");
 const resolveFrameForSelectorIfStatement = resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement => statement.getExpression().getText() === "!element" && statement.getThenStatement().getText() === "return null;");
 resolveFrameForSelectorIfStatement.replaceWithText(
 `if (!element) // My modification: instead of giving up, look for the frame in closed shadowRoot objects
-  element = await this.lookForFrameInClosedShadowRoots(frame, injectedScript, info, stringifySelector(info.parsed))`);
+  element = await this.lookForFrameInClosedShadowRoots(frame, injectedScript, info, stringifySelector(info.parsed))
+if (!element) return null;
+`);
 
 // -- queryArrayInMainWorld Method --
 const queryArrayInMainWorldMethod = frameSelectorsClass.getMethodOrThrow("queryArrayInMainWorld");
