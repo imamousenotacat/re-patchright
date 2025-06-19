@@ -1397,7 +1397,9 @@ constElementDeclaration.setDeclarationKind("let");
 const resolveFrameForSelectorIfStatement = resolveFrameForSelectorMethod.getDescendantsOfKind(SyntaxKind.IfStatement).find(statement => statement.getExpression().getText() === "!element" && statement.getThenStatement().getText() === "return null;");
 resolveFrameForSelectorIfStatement.replaceWithText(
 `if (!element) // My modification: instead of giving up, look for the frame in closed shadowRoot objects
-  element = await this.lookForFrameInClosedShadowRoots(frame, injectedScript, info, stringifySelector(info.parsed))`);
+  element = await this.lookForFrameInClosedShadowRoots(frame, injectedScript, info, stringifySelector(info.parsed))
+if (!element) return null;
+`);
 
 // -- _customFindFramesByParsed Method --
 frameSelectorsClass.addMethod({
