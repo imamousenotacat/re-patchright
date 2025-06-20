@@ -1096,7 +1096,8 @@ while (parsed.parts.length > 0) {
 
   if (part.name == "nth") {
     const partNth = Number(part.body);
-    if (partNth > currentScopingElements.length || partNth < -currentScopingElements.length) {
+    // Another edge case https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python/issues/61 ...
+    if ((currentScopingElements && partNth) && partNth >= currentScopingElements.length || partNth < -currentScopingElements.length ) {
           throw new Error("Can't query n-th element");
     } else {
       currentScopingElements = [currentScopingElements.at(partNth)];
