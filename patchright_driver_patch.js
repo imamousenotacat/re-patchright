@@ -2670,3 +2670,9 @@ for (const type of ["Frame", "JSHandle", "Worker"]) {
 }
 protocol["Frame"].commands.evalOnSelectorAll.parameters.isolatedContext = "boolean?";
 await fs.writeFile("packages/protocol/src/protocol.yml", YAML.stringify(protocol));
+
+// Setting the version number for the generated artifacts ...
+const packageJsonPath = "./package.json";
+const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+packageJson.version = "1.52.8";
+await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));

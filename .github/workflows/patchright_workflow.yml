@@ -5,8 +5,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Playwright Version'
-        default: 'v1.52.0'
+        description: 'Generated Artifacts Version'
+        default: 'v1.52.8'
   # running every hour
 #  schedule:
 #    - cron: '48 * * * *'
@@ -61,7 +61,7 @@ jobs:
       - name: Install Playwright Driver
         if: steps.version_check.outputs.proceed == 'true'
         run: |
-          git clone https://github.com/microsoft/playwright --branch ${{ env.playwright_version }}
+          git clone https://github.com/microsoft/playwright --branch v1.52.0
           cd playwright
           npm ci
 
