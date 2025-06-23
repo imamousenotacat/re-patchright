@@ -6,7 +6,7 @@ on:
     inputs:
       version:
         description: 'Generated Artifacts Version'
-        default: 'v1.52.8'
+        default: 'v1.52.9'
   # running every hour
 #  schedule:
 #    - cron: '48 * * * *'

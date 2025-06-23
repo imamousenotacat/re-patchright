@@ -355,15 +355,18 @@ if (isTextHtml && allInjections.length) {
   }
   let injectionHTML = "";
   allInjections.forEach((script) => {
-    let scriptId = crypto.randomBytes(22).toString('hex');
+    // let scriptId = crypto.randomBytes(22).toString('hex'); => NOT NEEDED. USING INSTEAD 'document.currentScript' TO REMOVE THE SCRIPT
     let scriptSource = script.source || script;
-    injectionHTML += \`<script class="\${this._page._delegate.initScriptTag}" nonce="\${scriptNonce}" type="text/javascript">document.getElementById("\${scriptId}")?.remove();\${scriptSource}</script>\`;
+    injectionHTML += \`<script class="\${this._page._delegate.initScriptTag}" nonce="\${scriptNonce}" type="text/javascript">document.currentScript.remove();\${scriptSource}</script>\`;
   });
+  // REPLACING THE BODY USING A REGULAR EXPRESSION. THE SCRIPTS WERE PREVIOUSLY INJECTED BEFORE AND OUT OF THE DOCUMENT NOT BEING REMOVED AND GENERATING AN
+  // UGLY VISUAL EFFECT ...
   if (response.isBase64) {
     response.isBase64 = false;
-    response.body = injectionHTML + Buffer.from(response.body, 'base64').toString('utf-8');
+    const html = Buffer.from(response.body, "base64").toString("utf-8");
+    response.body = html.replace(/(<body[^>]*>)/i, \`$1\${injectionHTML}\`);
   } else {
-    response.body = injectionHTML + response.body;
+    response.body = response.body.replace(/(<body[^>]*>)/i, \`$1\${injectionHTML}\`);
   }
 }
 this._fulfilled = true;
@@ -2674,5 +2677,5 @@ await fs.writeFile("packages/protocol/src/protocol.yml", YAML.stringify(protocol
 // Setting the version number for the generated artifacts ...
 const packageJsonPath = "./package.json";
 const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-packageJson.version = "1.52.8";
+packageJson.version = "1.52.9";
 await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
