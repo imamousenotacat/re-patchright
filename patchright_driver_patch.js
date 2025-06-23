@@ -328,7 +328,7 @@ if (constructorDeclaration) {
 // Inject HTML code
 const fulfillMethod = routeImplClass.getMethodOrThrow("fulfill");
 // Insert the custom code at the beginning of the `fulfill` method
-const customHTMLInjectCode = `const isTextHtml = response.headers.some(header => header.name === 'content-type' && header.value.includes('text/html'));
+const customHTMLInjectCode = `const isTextHtml = response.headers.some(header => header.name.toLowerCase() === 'content-type' && header.value.includes('text/html'));
 var allInjections = [...this._page._delegate._mainFrameSession._evaluateOnNewDocumentScripts];
     for (const binding of this._page._delegate._browserContext._pageBindings.values()) {
       if (!allInjections.includes(binding)) allInjections.push(binding);
