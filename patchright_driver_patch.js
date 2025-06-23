@@ -359,15 +359,20 @@ if (isTextHtml && allInjections.length) {
     let scriptSource = script.source || script;
     injectionHTML += \`<script class="\${this._page._delegate.initScriptTag}" nonce="\${scriptNonce}" type="text/javascript">document.currentScript.remove();\${scriptSource}</script>\`;
   });
-  // REPLACING THE BODY USING A REGULAR EXPRESSION. THE SCRIPTS WERE PREVIOUSLY INJECTED BEFORE AND OUT OF THE DOCUMENT NOT BEING REMOVED AND GENERATING AN
-  // UGLY VISUAL EFFECT ...
-  if (response.isBase64) {
-    response.isBase64 = false;
-    const html = Buffer.from(response.body, "base64").toString("utf-8");
-    response.body = html.replace(/(<body[^>]*>)/i, \`$1\${injectionHTML}\`);
+  // REPLACING THE BODY USING A REGULAR EXPRESSION. THE SCRIPTS WERE PREVIOUSLY INJECTED BEFORE AND OUT OF THE DOCUMENT,
+  // NOT BEING REMOVED AND GENERATING AN UGLY VISUAL EFFECT ...
+
+  // First, we get the response body as a plain UTF-8 string, decoding from Base64 if required.
+  let htmlBody = response.isBase64 ? Buffer.from(response.body, "base64").toString("utf-8"): response.body;
+  // Attempt to inject the script right after the opening <body> tag.
+  const modifiedHtml = htmlBody.replace(/(<body[^>]*>)/i, \`$1\${injectionHTML}\`);
+  // If the string is unchanged, the <body> tag was not found, so we fall back to prepending.
+  if (modifiedHtml === htmlBody) {
+    response.body = injectionHTML + htmlBody;
   } else {
-    response.body = response.body.replace(/(<body[^>]*>)/i, \`$1\${injectionHTML}\`);
+    response.body = modifiedHtml; // Success: Injected after <body>.
   }
+  response.isBase64 = false;
 }
 this._fulfilled = true;
 const body = response.isBase64 ? response.body : Buffer.from(response.body).toString('base64');
