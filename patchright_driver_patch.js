@@ -2689,5 +2689,5 @@ await fs.writeFile("packages/protocol/src/protocol.yml", YAML.stringify(protocol
 // Setting the version number for the generated artifacts ...
 const packageJsonPath = "./package.json";
 const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-packageJson.version = "1.52.9";
+packageJson.version = "1.52.10";
 await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
