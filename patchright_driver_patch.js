@@ -336,19 +336,25 @@ var allInjections = [...this._page._delegate._mainFrameSession._evaluateOnNewDoc
 if (isTextHtml && allInjections.length) {
   // I Chatted so hard for this Code
   let scriptNonce = crypto.randomBytes(22).toString('hex');
+  let useNonce = true;
   for (let i = 0; i < response.headers.length; i++) {
     if (response.headers[i].name === 'content-security-policy' || response.headers[i].name === 'content-security-policy-report-only') {
-      // Search for an existing script-src nonce that we can hijack
       let cspValue = response.headers[i].value;
-      const nonceRegex = /script-src[^;]*'nonce-([\\w-]+)'/;
-      const nonceMatch = cspValue.match(nonceRegex);
-      if (nonceMatch) {
-        scriptNonce = nonceMatch[1];
+      // If there was an 'unsafe-inline' expression present the addition of 'nonce' would nullify it.
+      if (/script-src[^;]*'unsafe-inline'/.test(cspValue)) {
+        useNonce = false;
       } else {
-        // Add the new nonce value to the script-src directive
-        const scriptSrcRegex = /(script-src[^;]*)(;|$)/;
-        const newCspValue = cspValue.replace(scriptSrcRegex, \`$1 'nonce-\${scriptNonce}'$2\`);
-        response.headers[i].value = newCspValue;
+        // Search for an existing script-src nonce that we can hijack
+        const nonceRegex = /script-src[^;]*'nonce-([\\w-]+)'/;
+        const nonceMatch = cspValue.match(nonceRegex);
+        if (nonceMatch) {
+          scriptNonce = nonceMatch[1];
+        } else {
+          // Add the new nonce value to the script-src directive
+          const scriptSrcRegex = /(script-src[^;]*)(;|$)/;
+          const newCspValue = cspValue.replace(scriptSrcRegex, \`$1 'nonce-\${scriptNonce}'$2\`);
+          response.headers[i].value = newCspValue;
+        }
       }
       break;
     }
@@ -357,7 +363,8 @@ if (isTextHtml && allInjections.length) {
   allInjections.forEach((script) => {
     // let scriptId = crypto.randomBytes(22).toString('hex'); => NOT NEEDED. USING INSTEAD 'document.currentScript' TO REMOVE THE SCRIPT
     let scriptSource = script.source || script;
-    injectionHTML += \`<script class="\${this._page._delegate.initScriptTag}" nonce="\${scriptNonce}" type="text/javascript">document.currentScript.remove();\${scriptSource}</script>\`;
+    injectionHTML += \`<script class="\${this._page._delegate.initScriptTag}"\${useNonce ? \` nonce="\${scriptNonce}"\` : ""} type="text/javascript">\` +
+          \`document.currentScript.remove();\${scriptSource}</script>\`;
   });
   // REPLACING THE BODY USING A REGULAR EXPRESSION. THE SCRIPTS WERE PREVIOUSLY INJECTED BEFORE AND OUT OF THE DOCUMENT,
   // NOT BEING REMOVED AND GENERATING AN UGLY VISUAL EFFECT ...
