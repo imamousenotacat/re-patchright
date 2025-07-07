@@ -2,7 +2,7 @@
     🎭 Re-Patchright
 </h1>
 
-This little project was created because I was fedup with getting blocked by Cloudflare verification and I wanted to do things like this in my [patched Browser Use version](https://github.com/imamousenotacat/re-browser-use):
+This little project was created because I was fed up with getting blocked by Cloudflare verification and I wanted to do things like this in my [patched Browser Use version](https://github.com/imamousenotacat/re-browser-use):
 
 ![nopecha_cloudflare.py](https://github.com/user-attachments/assets/2f16e2b4-9cef-4b4a-aa2d-e6ebf039cd14)
 
