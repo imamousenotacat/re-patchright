@@ -1,7 +1,36 @@
 <h1 align="center">
-    🎭 Patchright
+    🎭 Re-Patchright
 </h1>
 
+This little project was born because I wanted to do things like this:
+
+![nopecha_cloudflare.py](https://github.com/user-attachments/assets/2f16e2b4-9cef-4b4a-aa2d-e6ebf039cd14)
+
+which are not possible with *"regular"* patchright ...
+
+# Quick start
+
+With pip (according to [this](https://playwright.dev/python/docs/intro#system-requirements) you need Python>=3.8):
+
+```bash
+pip install re-patchright
+```
+
+Install the browser:
+
+```bash
+re-patchright install chromium --with-deps --no-shell
+```
+
+run the example program:
+
+```bash
+py examples/nopecha_cloudflare.py
+```
+
+you will get something similar to what the animated gif above displays.
+
+re-patchright install chromium --with-deps --no-shell
 
 <p align="center">
     <a href="https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/blob/main/LICENSE">
