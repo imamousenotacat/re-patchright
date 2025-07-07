@@ -142,6 +142,7 @@ Basically, I solved some edge cases in the logic that prevented patchright for b
 While working on this I think I fixed (for python version, I haven't built the NodeJs library) several issues still open in patchright:
 
 - https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python/issues/61
+- https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/95 This is 'Closed as not planned' but it's in fact exactly the case whose logic I followed to solve it
 - https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/81
 - https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/94
 - https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/98
