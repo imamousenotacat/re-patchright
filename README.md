@@ -2,12 +2,13 @@
     🎭 Re-Patchright
 </h1>
 
-This little project was born because I wanted to do things like this in [Browser Use](https://github.com/imamousenotacat/re-browser-use):
+This little project was created because I wanted to do things like this in my [patched Browser Use version](https://github.com/imamousenotacat/re-browser-use):
 
 ![nopecha_cloudflare.py](https://github.com/user-attachments/assets/2f16e2b4-9cef-4b4a-aa2d-e6ebf039cd14)
 
-which are not possible with the current (07/07/2025) *"regular"* patchright version ...
+and I developed a logic there in [Browser Use](https://github.com/imamousenotacat/re-browser-use) that, combined which some modifications here, in this project, and in [re-patchright-python](https://github.com/imamousenotacat/re-patchright-python), makes possible some use cases that are still not available with the current (07/07/2025) *"regular"* patchright and browser-use versions ...
 
+For more details in this check [re-browser-use](https://github.com/imamousenotacat/re-browser-use) repository.
 
 # Quick start
 
@@ -20,48 +21,85 @@ pip install re-patchright
 Install the browser (I'm using chromium here):
 
 ```bash
-re-patchright install chromium --with-deps --no-shell
+re-patchright install chromium --with-deps
 ```
 
-Run the example program:
+Run the example programs:
 
 ```bash
 py examples/nopecha_cloudflare.py
 ```
 
-You will get something similar to what the animated gif above displays.
+You will get for this one something similar to what the animated gif above displays but without coloured rectangles.
 
-The code for this little program is as follows (it's in the 'examples' repository folder):
-
-```python
-import asyncio
-from patchright.async_api import async_playwright, expect
-
-
-async def test_cloudflare():
-  async with (async_playwright() as playwright):
-    chromium = playwright.chromium
-    browser = await chromium.launch(headless=False)
-    context = await browser.new_context()
-    page = await context.new_page()
-    await page.goto("https://nopecha.com/demo/cloudflare")
-
-    # Create and check frame locator
-    SELECTOR = "iframe[src^='https://challenges.cloudflare.com/cdn-cgi/challenge-platform']"
-    frame_locator = page.frame_locator(SELECTOR)
-    await expect(frame_locator.owner).to_have_count(1, timeout=10000)
-
-    # Create, check and click locator for checkbox
-    check_box_locator = frame_locator.locator("input[type=checkbox]")
-    await expect(check_box_locator).to_be_visible(timeout=10000)
-    await check_box_locator.click()
-
-    await page.wait_for_timeout(timeout=5000)
-    await browser.close()
-
-if __name__ == "__main__":
-  asyncio.run(test_cloudflare())
+```bash
+py examples/armasPalpueblo.py
 ```
+
+You will get for this one (I owe the strange file name to a Mexican friend of mine with peculiar musical taste 🙂) an output like this:
+
+```bash
+λ py examples\armasPalPueblo.py
+ARMAS-PAL-PUEBLO 0: Found 120 children ...
+ARMAS-PAL-PUEBLO 1: Found 2 children HEAD and BODY the two elements of the Document in the iframe ...
+ARMAS-PAL-PUEBLO 2: Found 2 children ...
+ARMAS-PAL-PUEBLO 3: Found 2 children ...
+ARMAS-PAL-PUEBLO 4: Found 120 children ...
+ARMAS-PAL-PUEBLO 5: Found 2 children ...
+ARMAS-PAL-PUEBLO 6: Found children_count=[4] SHOULD BE EQUAL TO len(children)=[4] ...
+ARMAS-PAL-PUEBLO 7: Found children_count=[4] SHOULD BE EQUAL TO len(children)=[4] ...
+
+--- Starting Manual Recursive Search in Frame (Python API) ---
+Checking: <BODY>
+ Found 4 children for <BODY>
+  Checking: <STYLE>
+   Found 0 children for <STYLE>
+  Checking: <DIV.main-wrapper..KlAp8.theme-light.size-normal.lang-en-us>
+   Found 1 children for <DIV>
+    Checking: <DIV#content>
+     Found 8 children for <DIV#content>
+      Checking: <DIV#NMOK7>
+       Found 1 children for <DIV#NMOK7>
+        Checking: <DIV.cb-c>
+         Found 1 children for <DIV>
+          Checking: <LABEL.cb-lb>
+           Found 3 children for <LABEL>
+            Checking: <INPUT[type=checkbox]>
+            >>> Found checkbox locator: <Locator frame=<Frame name= url='https://nopecha.com/demo/cloudflare'> selector="iframe[src^='https://challenges.cloudflare.com/cdn-cgi/challenge-platform'] >> internal:control=enter-frame >> body >> nth=0 >> > * >> nth=1 >> > * >> nth=0 >> > * >> nth=0 >> > * >> nth=0 >> > * >> nth=0 >> > * >> nth=0">
+--- Manual Search Result: Found ---
+```
+
+which I admit is completely meaningless until you deep dive in the code. 
+
+If you are not interested in the technical details you can leave here and go to [re-broser-use](https://github.com/imamousenotacat/re-browser-use) for some practical use of this.
+
+
+# TL/DR: Ramblings and technical details
+
+This little program 
+
+```bash
+py examples/nopecha_cloudflare.py
+```
+
+works as well in *"regular"* patchright. 
+
+When I started this personal for fun project, it didn't, but I think that one of these commits fixed the issue:
+
+```bash
+814ccd5 Delete XPath Check to Support XPaths in CSR
+b153b7f Fix IFrame Location in Closed Shadow Roots
+```
+
+I implemented at the same time my own similar solution and I kept it here.  
+
+The code that still works differently in 'patchright' vs 're-patchright' is this:
+
+```bash
+py examples/armas_pal_pueblo.py
+```
+
+If you execute it using re-patchright you get the output I've already shown above.
 
 Now uninstall re-patchright (including the browsers, to be thorough) and install patchright instead: 
 
@@ -70,39 +108,55 @@ re-patchright uninstall --all
 pip uninstall re-patchright -y
 
 pip install patchright
-patchright install chromium --with-deps --no-shell
+patchright install chromium --with-deps
 ```
 
 Run the program again:
 
-re-patchright install chromium --with-deps --no-shell
+```bash
+py examples\armasPalPueblo.py
+```
 
-<p align="center">
-    <a href="https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/blob/main/LICENSE">
-        <img src="https://img.shields.io/badge/License-Apache%202.0-green">
-    </a>
-    <a>
-        <img src="https://img.shields.io/badge/Based%20on-Playwright-goldenrod">
-    </a>
-    <a>
-        <img src="https://img.shields.io/badge/Driver-Patched-blue">
-    </a>
-    <a href="https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/releases/latest">
-        <img alt="Patchright Version" src="https://img.shields.io/github/v/release/microsoft/playwright?display_name=release&label=Version">
-    </a>
-    <a href="https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python">
-        <img src="https://img.shields.io/badge/Package-Python-seagreen">
-    </a>
-    <a href="https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python/releases">
-        <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/pepy/dt/patchright?color=red&label=Python%20Downloads">
-    </a>
-    <a href="https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs">
-        <img src="https://img.shields.io/badge/Package-NodeJS-seagreen">
-    </a>
-    <a href="https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs/releases">
-        <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/npm/d18m/patchright?color=red&label=NodeJS%20Downloads">
-    </a>
-</p>
+and now the output is different:
+
+```bash
+ARMAS-PAL-PUEBLO 0: Found 120 children ...
+ARMAS-PAL-PUEBLO 1: Found 2 children HEAD and BODY the two elements of the Document in the iframe ...
+ARMAS-PAL-PUEBLO 2: Found 2 children ...
+ARMAS-PAL-PUEBLO 3: Found 2 children ...
+ARMAS-PAL-PUEBLO 4: Found 13 children ...
+ARMAS-PAL-PUEBLO 5: Found 2 children ...
+ARMAS-PAL-PUEBLO 6: Found children_count=[4] SHOULD BE EQUAL TO len(children)=[0] ...
+ARMAS-PAL-PUEBLO 7: Found children_count=[0] SHOULD BE EQUAL TO len(children)=[0] ...
+
+--- Starting Manual Recursive Search in Frame (Python API) ---
+Checking: <BODY>
+ Found 0 children for <BODY>
+--- Manual Search Result: Not Found ---
+```
+
+Basically, I solved some edge cases in the logic that prevented patchright for being able to recursively traverse a DOM tree by iteratively using a css selector ">*" when there are closed ShadowRoot present.
+
+***This allows me to implement in [re-browser-use](https://github.com/imamousenotacat/re-browser-use) a method that seems to be able to defeat Cloudflare verification while using Browser Use.***
+
+While working on this I think I fixed (for python version, I haven't built the NodeJs library) several issues still open in patchright:
+
+- https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python/issues/61
+- https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/81
+- https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/94
+- https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/98
+- https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/100
+
+The last four are related to each other. The solution is not mine I found it [here](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/81#issuecomment-3009095747)
+
+## Why is this project not a PR or a small collection of them?
+
+Well, to be honest: 
+
+- Playwright code is difficult, at least for me. I work in IT, but I'm not a developer; I never really was, and I probably never will be. What I did was simply follow the logic I was interested in and carefully adapt it to my use case without breaking anything, but without being completely sure that what I was doing was the correct general solution.
+- Regarding the fixes for the issues, I'm pretty sure they are correct, but I was in a hurry, I needed the changes, and [Vinyzu](https://github.com/Vinyzu/) seems to be busy lately and not paying much attention to this repository.. 
+
+------
 
 #### Patchright is a patched and undetected version of the Playwright Testing and Automation Framework. </br> It can be used as a drop-in replacement for Playwright.
 
@@ -112,100 +166,7 @@ re-patchright install chromium --with-deps --no-shell
 > [!IMPORTANT]  
 > Patchright only patches CHROMIUM based browsers. Firefox and Webkit are not supported.
 
----
-
-## Patches
-
-### [Runtime.enable](https://vanilla.aslushnikov.com/?Runtime.enable) Leak
-This is the biggest Patch Patchright uses. To avoid detection by this leak, patchright avoids using [Runtime.enable](https://vanilla.aslushnikov.com/?Runtime.enable) by executing Javascript in (isolated) ExecutionContexts.
-
-### [Console.enable](https://vanilla.aslushnikov.com/?Console.enable) Leak
-Patchright patches this leak by disabling the Console API all together. This means, console functionality will not work in Patchright. If you really need the console, you might be better off using Javascript loggers, although they also can be easily detected.
-
-### Command Flags Leaks
-Patchright tweaks the Playwright Default Args to avoid detection by Command Flag Leaks. This (most importantly) affects:
-- `--disable-blink-features=AutomationControlled` (added) to avoid navigator.webdriver detection.
-- `--enable-automation` (removed) to avoid navigator.webdriver detection.
-- `--disable-popup-blocking` (removed) to avoid popup crashing.
-- `--disable-component-update` (removed) to avoid detection as a Stealth Driver.
-- `--disable-default-apps` (removed) to enable default apps.
-- `--disable-extensions` (removed) to enable extensions
-
-### General Leaks
-Patchright patches some general leaks in the Playwright codebase. This mainly includes poor setups and obvious detection points.
-
-### Closed Shadow Roots
-Patchright is able to interact with elements in Closed Shadow Roots. Just use normal locators and Patchright will do the rest.
-<br/>
-Patchright is now also able to use XPaths in Closed Shadow Roots.
-
----
-
-## Stealth
-
-With the right setup, Patchright currently is considered undetectable.
-Patchright passes:
-- [Brotector](https://kaliiiiiiiiii.github.io/brotector/) ✅ (with [CDP-Patches](https://github.com/Kaliiiiiiiiii-Vinyzu/CDP-Patches/))
-- [Cloudflare](https://cloudflare.com/) ✅
-- [Kasada](https://www.kasada.io/) ✅
-- [Akamai](https://www.akamai.com/products/bot-manager/) ✅
-- [Shape/F5](https://www.f5.com/) ✅
-- [Bet365](https://bet365.com/) ✅
-- [Datadome](https://datadome.co/products/bot-protection/) ✅
-- [Fingerprint.com](https://fingerprint.com/products/bot-detection/) ✅
-- [CreepJS](https://abrahamjuliot.github.io/creepjs/) ✅
-- [Sannysoft](https://bot.sannysoft.com/) ✅
-- [Incolumitas](https://bot.incolumitas.com/) ✅
-- [IPHey](https://iphey.com/) ✅
-- [Browserscan](https://browserscan.net/) ✅
-- [Pixelscan](https://pixelscan.net/) ✅
-
----
-
-## Bugs
-#### Even though we have spent a lot of time to make Patchright as stable as possible, bugs may still occur. If you encounter any bugs, please report them in the [Issues](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues).
-
-> [!WARNING]  
-> Patchright passes most, but not all the Playwright tests. Some bugs are considered impossible to solve, some are just not relevant. See the list of bugs and their explanation [here](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/30).
-
-#### Based on the Playwright Tests, we concluded that its highly unlikely that you will be affected by these bugs in regular usecases.
-
-<details>
-    <summary><b>Init Script Shenanigans</b></summary>
-
-### Explanation
-To be able to use InitScripts without [Runtime.enable](https://vanilla.aslushnikov.com/?Runtime.enable), Patchright uses Playwright Routes to inject JavaScript into HTML requests.
-
-### Bugs
-Playwright Routes may cause some bugs in other parts of your code. Patchright InitScripts won't cause any bugs that wouldn't be caused by normal Playwright Routes. </br> If you want any of these bugs fixed, you'll have to contact the Playwright team.
-
-### Leaks
-Patchright InitScripts can be detected by Timing Attacks. However, no antibot currently checks for this kind of Timing Attack and they probably won't for a good amount of time. </br> We consider them not to be a big risk of detection.
-
-</details>
-
----
-
-### TODO
-- [x] Implement Option to choose Execution Context (Main/Isolated).
-- [ ] Fix Fixable Bugs.
-- [x] Implement .patch Updater to easily show Patchright's patches.
-- [ ] Setup Automated Testing on new Release.
-- [ ] Implement Patchright on .NET and Java.
-
----
-
-## Development
-
-Deployment of new Patchright versions are automatic, but bugs due to Playwright codebase changes may occur. Fixes for these bugs might take a few days to be released. 
-
----
-
-## Support our work
-
-If you choose to support our work, please contact [@vinyzu](https://discord.com/users/935224495126487150) or [@steve_abcdef](https://discord.com/users/936292409426477066) on Discord.
-
----
+------
 
 ## Copyright and License
 © [Vinyzu](https://github.com/Vinyzu/)

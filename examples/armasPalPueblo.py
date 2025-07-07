@@ -77,7 +77,7 @@ async def get_element_info(locator):
 async def test_cloudflare():
     async with (async_playwright() as playwright):
         chromium = playwright.chromium
-        browser = await chromium.launch(headless=False)
+        browser = await chromium.launch(headless=True)
         context = await browser.new_context()
         # TODO:pvm14 TESTING IF JUST BY MAKING shadowRoot open WITH THE CALL await context.add_init_script MANUALLY PASSING THE TURNSTILE BREAKS.
         # YEAP, INDEED BREAKS WHICH I THINK IS GOOD NEWS BECAUSE IT MEANS THAT BrowserUse MAY BE BREAKING NOTHING BY ITSELF. WE WILL SEE ...
@@ -94,15 +94,16 @@ async def test_cloudflare():
 
         page = await context.new_page()
         await page.goto("https://nopecha.com/demo/cloudflare")
-        # This is what I get from playwright codegen https://nopecha.com/demo/cloudflare that obviously does not work because it changes for each interaction ...
-        # locator = page.locator("iframe[src=\"https\\:\\/\\/challenges\\.cloudflare\\.com\\/cdn-cgi\\/challenge-platform\\/h\\/b\\/turnstile\\/if\\/ov2\\/av0\\/rcv\\/knz61\\/0x4AAAAAAAAjq6WYeRDKmebM\\/light\\/fbE\\/new\\/normal\\/auto\\/\"]").content_frame.locator("body")
-        # This is the selector that Claude suggested => AND COMBINED WITH THE PROPER WAITING IS WORKING ...
-        SELECTOR = "iframe[src^='https://challenges.cloudflare.com/cdn-cgi/challenge-platform']"
-        await page.wait_for_load_state('load')
-        await page.wait_for_timeout(10000)                # FUCK OFF WITHOUT THIS THE AUTOMATIC CLICK DOESN'T GET PERFORMED ???? OK we have to deal with the fact this is a PATCHED playwright ...
 
-        frame_locator = page.frame_locator(SELECTOR)      # Create frame locator
-        # locator = frame_locator.locator("body")           # Create body locator
+        # Create and check frame locator
+        SELECTOR = "iframe[src^='https://challenges.cloudflare.com/cdn-cgi/challenge-platform']"
+        frame_locator = page.frame_locator(SELECTOR)
+        await expect(frame_locator.owner).to_have_count(1, timeout=10000)
+        # Create and wait for checkbox locator to be visible ...
+        check_box_locator = frame_locator.locator("input[type=checkbox]")
+        await expect(check_box_locator).to_be_visible(timeout=10000)
+
+      # locator = frame_locator.locator("body")           # Create body locator
         # Validate frame existence
         # await expect(frame_locator.owner).to_be_attached(timeout=1000)  # Checks iframe exists in DOM
         # Validate frame content
@@ -139,8 +140,8 @@ async def test_cloudflare():
         children_count = await children_locator.count()
         children = await children_locator.element_handles()
         print(f"ARMAS-PAL-PUEBLO 7: Found children_count=[{children_count}] SHOULD BE EQUAL TO len(children)=[{len(children)}] ...")
-        children = await page.query_selector_all('*')
-        print(f"ARMAS-PAL-PUEBLO 8: Found children_count=[{len(children)}] for query_selector_all('*') PROBABLY WORK TO DO HERE ...")
+        # children = await page.query_selector_all('*')
+        # print(f"ARMAS-PAL-PUEBLO 8: Found children_count=[{len(children)}] for query_selector_all('*') PROBABLY SOME WORK TO BE DONE HERE ...")
         #await locator.click()  # Finally we click ... I can click this or the one below => THIS DOESN'T WORK FOR closed ShadowRoots
         # await frame_locator.owner.click()  # Finally we click ...
         # # await asyncio.sleep(10)  # Waiting for the results of the click
