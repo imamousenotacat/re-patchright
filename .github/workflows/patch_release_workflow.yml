@@ -1,9 +1,11 @@
 name: Trigger on Commit and Manual Request
 
 on:
-  push:
-    branches:
-      - "main"
+  # enabling manual trigger
+  workflow_dispatch:
+#  push:
+#    branches:
+#      - "main"
 
 permissions:
   actions: none
