@@ -4,7 +4,7 @@
 
 This little project was born because I wanted to do things like this:
 
-![nopecha_cloudflare.py](https://github.com/user-attachments/assets/2f16e2b4-9cef-4b4a-aa2d-e6ebf039cd14)
+![nopecha_cloudflare.py](https://github.com/user-attachments/assets/0145d1e8-c984-425b-a6ce-b58e57457a3c)
 
 which are not possible with *"regular"* patchright ...
 
