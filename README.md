@@ -6,7 +6,7 @@ This little project was created because I was fed up with getting blocked by Clo
 
 ![nopecha_cloudflare.py](https://github.com/user-attachments/assets/2f16e2b4-9cef-4b4a-aa2d-e6ebf039cd14)
 
-and I developed a logic there in [Browser Use](https://github.com/imamousenotacat/re-browser-use) that, combined which some modifications here, in this project, and in [re-patchright-python](https://github.com/imamousenotacat/re-patchright-python), makes possible some use cases that are still not available with the current (07/07/2025) *"regular"* patchright and browser-use versions ...
+I developed a logic in [Browser Use](https://github.com/imamousenotacat/re-browser-use) that, combined which some modifications here, in this project, and in [re-patchright-python](https://github.com/imamousenotacat/re-patchright-python), makes possible some use cases that are still not available with the current (07/07/2025) *"regular"* patchright and browser-use versions ...
 
 For more details on this check [re-browser-use](https://github.com/imamousenotacat/re-browser-use) repository.
 
