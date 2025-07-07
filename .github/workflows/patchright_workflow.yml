@@ -61,7 +61,7 @@ jobs:
       - name: Install Playwright Driver
         if: steps.version_check.outputs.proceed == 'true'
         run: |
-          git clone https://github.com/microsoft/playwright --branch 1.51.1
+          git clone https://github.com/microsoft/playwright --branch v1.51.1
           cd playwright
           npm ci
 
