@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Playwright Version'
+        description: 'Generated Artifacts Version'
         default: 'v1.51.4'
   # running every hour
 #  schedule:
