@@ -2,33 +2,78 @@
     🎭 Re-Patchright
 </h1>
 
-This little project was born because I wanted to do things like this:
+This little project was born because I wanted to do things like this in [Browser Use](https://github.com/imamousenotacat/re-browser-use):
 
-![nopecha_cloudflare.py](https://github.com/user-attachments/assets/0145d1e8-c984-425b-a6ce-b58e57457a3c)
+![nopecha_cloudflare.py](https://github.com/user-attachments/assets/2f16e2b4-9cef-4b4a-aa2d-e6ebf039cd14)
 
-which are not possible with *"regular"* patchright ...
+which are not possible with the current (07/07/2025) *"regular"* patchright version ...
+
 
 # Quick start
 
-With pip (according to [this](https://playwright.dev/python/docs/intro#system-requirements) you need Python>=3.8):
+Install the package using pip (according to [this](https://playwright.dev/python/docs/intro#system-requirements) you need Python>=3.8):
 
 ```bash
 pip install re-patchright
 ```
 
-Install the browser:
+Install the browser (I'm using chromium here):
 
 ```bash
 re-patchright install chromium --with-deps --no-shell
 ```
 
-run the example program:
+Run the example program:
 
 ```bash
 py examples/nopecha_cloudflare.py
 ```
 
-you will get something similar to what the animated gif above displays.
+You will get something similar to what the animated gif above displays.
+
+The code for this little program is as follows (it's in the 'examples' repository folder):
+
+```python
+import asyncio
+from patchright.async_api import async_playwright, expect
+
+
+async def test_cloudflare():
+  async with (async_playwright() as playwright):
+    chromium = playwright.chromium
+    browser = await chromium.launch(headless=False)
+    context = await browser.new_context()
+    page = await context.new_page()
+    await page.goto("https://nopecha.com/demo/cloudflare")
+
+    # Create and check frame locator
+    SELECTOR = "iframe[src^='https://challenges.cloudflare.com/cdn-cgi/challenge-platform']"
+    frame_locator = page.frame_locator(SELECTOR)
+    await expect(frame_locator.owner).to_have_count(1, timeout=10000)
+
+    # Create, check and click locator for checkbox
+    check_box_locator = frame_locator.locator("input[type=checkbox]")
+    await expect(check_box_locator).to_be_visible(timeout=10000)
+    await check_box_locator.click()
+
+    await page.wait_for_timeout(timeout=5000)
+    await browser.close()
+
+if __name__ == "__main__":
+  asyncio.run(test_cloudflare())
+```
+
+Now uninstall re-patchright (including the browsers, to be thorough) and install patchright instead: 
+
+```bash
+re-patchright uninstall --all 
+pip uninstall re-patchright -y
+
+pip install patchright
+patchright install chromium --with-deps --no-shell
+```
+
+Run the program again:
 
 re-patchright install chromium --with-deps --no-shell
 
