@@ -74,7 +74,7 @@ which I admit is completely meaningless until you deep dive in the code.
 If you are not interested in the technical details you can leave here and go to [re-broser-use](https://github.com/imamousenotacat/re-browser-use) for some practical use of this.
 
 
-# TL/DR: Ramblings and technical details
+# TL/DR: Ramblings and some technical details
 
 This little program 
 
